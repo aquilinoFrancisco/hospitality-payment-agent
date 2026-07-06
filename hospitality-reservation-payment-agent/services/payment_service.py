@@ -3,12 +3,13 @@
 Payment business service.
 
 This service coordinates payment-related business rules using mock JSON
-repositories and a Stripe Sandbox client wrapper.
+repositories and a provider-agnostic payment integration layer.
 
 Important:
 - The AI agent never charges directly.
 - The system only creates payment links.
-- Stripe webhook confirmation is the source of truth.
+- The payment provider executes the payment.
+- Webhook confirmation is the source of truth.
 - Every payment operation should be traceable and idempotent.
 """
 
@@ -19,7 +20,7 @@ from typing import Any, Dict, Optional
 
 import structlog
 
-from integrations.stripe.client import StripeSandboxClient
+from integrations.payments import PaymentProviderFactory
 from repositories.payment_repository import PaymentRepository
 from repositories.reservation_repository import ReservationRepository
 from repositories.room_repository import RoomRepository
@@ -32,8 +33,11 @@ class PaymentService:
     """
     Core payment business service.
 
-    Coordinates pricing, payment-link creation, payment completion and refunds.
+    The service does not depend directly on Stripe, Conekta or Mercado Pago.
+    It depends on the generic PaymentProvider contract through the factory.
     """
+
+    DEFAULT_PROVIDER = "stripe"
 
     @staticmethod
     def calculate_price(
@@ -87,33 +91,34 @@ class PaymentService:
         amount: float,
         currency: str = "usd",
         idempotency_key: Optional[str] = None,
+        provider: str = DEFAULT_PROVIDER,
     ) -> Dict[str, Any]:
         """
-        Create a safe Stripe Sandbox payment link.
+        Create a safe payment link using the configured payment provider.
 
-        The payment link is created in mock sandbox mode.
+        Supported providers:
+        - stripe
+        - conekta
+        - mercado_pago
 
-        Args:
-            reservation_id: Reservation identifier.
-            amount: Amount to charge.
-            currency: Payment currency.
-            idempotency_key: Unique operation key.
-
-        Returns:
-            JSON-safe payment payload.
+        The agent never charges directly.
+        The provider generates the checkout/payment link.
         """
+
         idempotency_key = (
             idempotency_key
             or f"idem_pay_{reservation_id}"
         )
 
         currency = currency.lower()
+        provider = provider.lower()
 
         logger.info(
             "payment_create_link_called",
             reservation_id=reservation_id,
             amount=amount,
             currency=currency,
+            provider=provider,
             idempotency_key=idempotency_key,
         )
 
@@ -132,11 +137,13 @@ class PaymentService:
             if (
                 payment.get("reservation_id") == reservation_id
                 and payment.get("status") == "PENDING"
+                and payment.get("provider", provider) == provider
             ):
                 logger.info(
                     "pending_payment_already_exists",
                     payment_id=payment["payment_id"],
                     reservation_id=reservation_id,
+                    provider=provider,
                 )
 
                 return {
@@ -146,6 +153,7 @@ class PaymentService:
                     "payment_session_id": payment["payment_session_id"],
                     "amount": payment.get("amount", amount),
                     "currency": payment.get("currency", currency),
+                    "provider": payment.get("provider", provider),
                     "status": payment["status"],
                     "idempotency_key": payment.get(
                         "idempotency_key",
@@ -153,18 +161,18 @@ class PaymentService:
                     ),
                 }
 
-        stripe_client = StripeSandboxClient()
+        payment_provider = PaymentProviderFactory.create(provider)
 
-        checkout_session = stripe_client.create_checkout_session(
+        provider_response = payment_provider.create_payment_link(
             reservation_id=reservation_id,
             amount=amount,
             currency=currency,
             idempotency_key=idempotency_key,
         )
 
-        payment_id = f"pay_{len(payments) + 1:03d}"
-        payment_session_id = checkout_session["id"]
-        payment_link = checkout_session["url"]
+        payment_id = provider_response["payment_id"]
+        payment_session_id = payment_id
+        payment_link = provider_response["payment_link"]
 
         now = datetime.utcnow().isoformat() + "Z"
 
@@ -173,11 +181,12 @@ class PaymentService:
             "reservation_id": reservation_id,
             "amount": amount,
             "currency": currency,
+            "provider": provider_response["provider"],
             "status": "PENDING",
             "payment_link": payment_link,
             "payment_session_id": payment_session_id,
             "idempotency_key": idempotency_key,
-            "provider": "stripe_sandbox",
+            "provider_response": provider_response,
             "created_at": now,
             "updated_at": now,
         }
@@ -186,6 +195,7 @@ class PaymentService:
 
         target_reservation["payment_link"] = payment_link
         target_reservation["payment_session_id"] = payment_session_id
+        target_reservation["payment_provider"] = provider_response["provider"]
         target_reservation["updated_at"] = now
 
         ReservationRepository.update_reservation(
@@ -203,6 +213,7 @@ class PaymentService:
             reservation_id=reservation_id,
             payment_id=payment_id,
             payment_session_id=payment_session_id,
+            provider=provider_response["provider"],
             current_state="PRICE_CALCULATED",
             next_state="PENDING_PAYMENT",
             currency=currency,
@@ -216,6 +227,7 @@ class PaymentService:
             "payment_session_id": payment_session_id,
             "amount": amount,
             "currency": currency,
+            "provider": provider_response["provider"],
             "status": "PENDING",
             "idempotency_key": idempotency_key,
         }
@@ -223,23 +235,39 @@ class PaymentService:
     @staticmethod
     def get_payment_status(
         payment_id: str,
+        provider: str = DEFAULT_PROVIDER,
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieve payment status from mock storage.
+        Retrieve payment status from local storage and provider abstraction.
         """
         logger.info(
             "payment_status_requested",
             payment_id=payment_id,
+            provider=provider,
         )
 
-        return PaymentRepository.get_payment(payment_id)
+        local_payment = PaymentRepository.get_payment(payment_id)
+
+        if not local_payment:
+            return None
+
+        payment_provider = PaymentProviderFactory.create(
+            local_payment.get("provider", provider)
+        )
+
+        provider_status = payment_provider.get_payment_status(payment_id)
+
+        return {
+            **local_payment,
+            "provider_status": provider_status,
+        }
 
     @staticmethod
     def mark_payment_completed(
         payment_session_id: str,
     ) -> Dict[str, Any]:
         """
-        Simulate Stripe webhook confirmation.
+        Simulate webhook confirmation.
 
         State transition:
             PENDING_PAYMENT -> PAID -> RESERVATION_CONFIRMED
@@ -285,6 +313,7 @@ class PaymentService:
             reservation_id=reservation_id,
             payment_id=target_payment["payment_id"],
             payment_session_id=payment_session_id,
+            provider=target_payment.get("provider"),
             timestamp=now,
         )
 
@@ -293,6 +322,7 @@ class PaymentService:
             "reservation_id": reservation_id,
             "status": "COMPLETED",
             "currency": target_payment.get("currency", "usd"),
+            "provider": target_payment.get("provider"),
             "updated_at": now,
         }
 
@@ -302,10 +332,12 @@ class PaymentService:
         amount: float,
         currency: str = "usd",
         idempotency_key: Optional[str] = None,
+        provider: str = DEFAULT_PROVIDER,
     ) -> Dict[str, Any]:
         """
-        Issue a mock refund and transition reservation to REFUNDED.
+        Issue a refund using the same provider used for the payment.
         """
+
         idempotency_key = (
             idempotency_key
             or f"idem_refund_{payment_session_id}"
@@ -318,6 +350,7 @@ class PaymentService:
             payment_session_id=payment_session_id,
             amount=amount,
             currency=currency,
+            provider=provider,
             idempotency_key=idempotency_key,
         )
 
@@ -330,10 +363,12 @@ class PaymentService:
                 f"Payment session '{payment_session_id}' not found."
             )
 
-        stripe_client = StripeSandboxClient()
+        selected_provider = target_payment.get("provider", provider)
 
-        refund = stripe_client.refund_payment(
-            charge_id=target_payment["payment_id"],
+        payment_provider = PaymentProviderFactory.create(selected_provider)
+
+        refund = payment_provider.refund_payment(
+            payment_id=target_payment["payment_id"],
             amount=amount,
             currency=currency,
             idempotency_key=idempotency_key,
@@ -343,6 +378,7 @@ class PaymentService:
 
         target_payment["status"] = "REFUNDED"
         target_payment["updated_at"] = now
+        target_payment["refund"] = refund
 
         PaymentRepository.update_payment(
             target_payment["payment_id"],
@@ -360,16 +396,18 @@ class PaymentService:
             "payment_refunded",
             reservation_id=reservation_id,
             payment_id=target_payment["payment_id"],
-            refund_id=refund["id"],
+            refund_id=refund["refund_id"],
+            provider=selected_provider,
             timestamp=now,
         )
 
         return {
             "payment_id": target_payment["payment_id"],
             "reservation_id": reservation_id,
-            "refund_id": refund["id"],
+            "refund_id": refund["refund_id"],
             "amount_refunded": amount,
             "currency": currency,
+            "provider": selected_provider,
             "status": "REFUNDED",
             "idempotency_key": idempotency_key,
         }
