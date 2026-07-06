@@ -1,0 +1,67 @@
+[
+  {
+    "reservation_id": "res_001",
+    "customer_id": "cust_01",
+    "room_id": "deluxe-suite",
+    "check_in": "2026-07-10",
+    "check_out": "2026-07-15",
+    "reservation_state": "RESERVATION_CONFIRMED",
+    "payment_link": "https://sandbox.stripe.local/pay/demo-session-001",
+    "payment_session_id": "sess_001",
+    "idempotency_key": "idem_001",
+    "created_at": "2026-07-06T10:00:00Z",
+    "updated_at": "2026-07-06T10:05:00Z"
+  },
+  {
+    "reservation_id": "res_002",
+    "customer_id": "cust_02",
+    "room_id": "standard-queen",
+    "check_in": "2026-07-12",
+    "check_out": "2026-07-14",
+    "reservation_state": "PENDING_PAYMENT",
+    "payment_link": "https://sandbox.stripe.local/pay/demo-session-002",
+    "payment_session_id": "sess_002",
+    "idempotency_key": "idem_002",
+    "created_at": "2026-07-06T11:00:00Z",
+    "updated_at": "2026-07-06T11:02:00Z"
+  },
+  {
+    "reservation_id": "res_003",
+    "customer_id": "cust_03",
+    "room_id": "penthouse",
+    "check_in": "2026-07-20",
+    "check_out": "2026-07-25",
+    "reservation_state": "CANCELLED",
+    "payment_link": null,
+    "payment_session_id": null,
+    "idempotency_key": "idem_003",
+    "created_at": "2026-07-05T09:00:00Z",
+    "updated_at": "2026-07-05T15:00:00Z"
+  },
+  {
+    "reservation_id": "res_004",
+    "customer_id": "cust_04",
+    "room_id": "single-cozy",
+    "check_in": "2026-07-15",
+    "check_out": "2026-07-17",
+    "reservation_state": "PAID",
+    "payment_link": "https://sandbox.stripe.local/pay/demo-session-004",
+    "payment_session_id": "sess_004",
+    "idempotency_key": "idem_004",
+    "created_at": "2026-07-06T08:00:00Z",
+    "updated_at": "2026-07-06T08:15:00Z"
+  },
+  {
+    "reservation_id": "res_005",
+    "customer_id": "cust_05",
+    "room_id": "ocean-villa",
+    "check_in": "2026-08-01",
+    "check_out": "2026-08-05",
+    "reservation_state": "REQUEST_RECEIVED",
+    "payment_link": null,
+    "payment_session_id": null,
+    "idempotency_key": "idem_005",
+    "created_at": "2026-07-06T12:00:00Z",
+    "updated_at": "2026-07-06T12:00:00Z"
+  }
+]

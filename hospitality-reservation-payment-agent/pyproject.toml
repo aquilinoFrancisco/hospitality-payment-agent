@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "hospitality-reservation-payment-agent"
+version = "0.1.0"
+description = "AI Agentic Platform for Hotel Reservations and Payments with a safe, auditable payment workflow."
+authors = ["Aquilino Francisco <aquilino.francisco@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.111.0"
+uvicorn = "^0.30.1"
+langgraph = "^0.1.4"
+crewai = "^0.32.0"
+stripe = "^9.10.0"
+pydantic = "^2.7.4"
+structlog = "^24.1.0"
+python-dotenv = "^1.0.1"
+sentence-transformers = "^3.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

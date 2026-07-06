@@ -1,0 +1,12 @@
+[
+  {"id": "deluxe-suite", "name": "Deluxe Suite", "base_price": 250.00, "capacity": 3},
+  {"id": "standard-queen", "name": "Standard Queen Room", "base_price": 140.00, "capacity": 2},
+  {"id": "penthouse", "name": "Panoramic Penthouse", "base_price": 600.00, "capacity": 5},
+  {"id": "single-cozy", "name": "Cozy Single Room", "base_price": 90.00, "capacity": 1},
+  {"id": "double-comfort", "name": "Double Comfort Room", "base_price": 160.00, "capacity": 2},
+  {"id": "family-suite", "name": "Spacious Family Suite", "base_price": 320.00, "capacity": 6},
+  {"id": "executive-king", "name": "Executive King Room", "base_price": 210.00, "capacity": 2},
+  {"id": "ocean-villa", "name": "Luxury Ocean Villa", "base_price": 750.00, "capacity": 4},
+  {"id": "garden-cabin", "name": "Charming Garden Cabin", "base_price": 180.00, "capacity": 3},
+  {"id": "budget-twin", "name": "Budget Twin Room", "base_price": 80.00, "capacity": 2}
+]

@@ -1,0 +1,6 @@
+{
+  "name": "Hospitality Reservation Payment Agent Explorer",
+  "description": "An interactive portfolio and architecture explorer for the hospitality reservation and payment agentic system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
