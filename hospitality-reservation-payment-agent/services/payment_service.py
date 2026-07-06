@@ -1,27 +1,58 @@
 # services/payment_service.py
-import structlog
+"""
+Payment business service.
+
+This service coordinates payment-related business rules using mock JSON
+repositories and a Stripe Sandbox client wrapper.
+
+Important:
+- The AI agent never charges directly.
+- The system only creates payment links.
+- Stripe webhook confirmation is the source of truth.
+- Every payment operation should be traceable and idempotent.
+"""
+
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from repositories.room_repository import RoomRepository
-from repositories.reservation_repository import ReservationRepository
+from typing import Any, Dict, Optional
+
+import structlog
+
+from integrations.stripe.client import StripeSandboxClient
 from repositories.payment_repository import PaymentRepository
+from repositories.reservation_repository import ReservationRepository
+from repositories.room_repository import RoomRepository
 from services.reservation_service import ReservationService
 
 logger = structlog.get_logger()
 
+
 class PaymentService:
     """
-    Core payment business service coordinating mock Stripe operations.
-    Strictly decoupled from actual payment gateway client SDKs.
+    Core payment business service.
+
+    Coordinates pricing, payment-link creation, payment completion and refunds.
     """
 
     @staticmethod
-    def calculate_price(room_id: str, check_in: str, check_out: str) -> float:
+    def calculate_price(
+        room_id: str,
+        check_in: str,
+        check_out: str,
+    ) -> float:
         """
-        Calculates the pricing based on room base_price and duration in nights.
+        Calculate reservation price based on room base price and nights.
         """
-        logger.info("Service: calculate_price called", room_id=room_id, check_in=check_in, check_out=check_out)
+        logger.info(
+            "payment_calculate_price_called",
+            room_id=room_id,
+            check_in=check_in,
+            check_out=check_out,
+        )
+
         room = RoomRepository.get_room(room_id)
+
         if not room:
             raise ValueError(f"Room type '{room_id}' not found.")
 
@@ -29,149 +60,316 @@ class PaymentService:
             date_format = "%Y-%m-%d"
             start_date = datetime.strptime(check_in, date_format)
             end_date = datetime.strptime(check_out, date_format)
-            delta = end_date - start_date
-            nights = max(1, delta.days)
-        except Exception as e:
-            logger.warn("Invalid date formatting. Defaulting billing calculation to 1 night.", error=str(e))
+            nights = max(1, (end_date - start_date).days)
+
+        except Exception as exc:
+            logger.warning(
+                "invalid_date_format_defaulting_to_one_night",
+                error=str(exc),
+            )
             nights = 1
 
-        total_price = room["base_price"] * nights
-        logger.info("Calculated pricing", room_id=room_id, base_price=room["base_price"], nights=nights, total_price=total_price)
+        total_price = float(room["base_price"]) * nights
+
+        logger.info(
+            "payment_price_calculated",
+            room_id=room_id,
+            base_price=room["base_price"],
+            nights=nights,
+            total_price=total_price,
+        )
+
         return total_price
 
     @staticmethod
-    def create_payment_link(reservation_id: str, amount: float, idempotency_key: str) -> Dict[str, Any]:
+    def create_payment_link(
+        reservation_id: str,
+        amount: float,
+        currency: str = "usd",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Generates a fake payment session and registers a PENDING payment.
-        Transitions the reservation to 'PENDING_PAYMENT' state.
-        """
-        logger.info("Service: create_payment_link called", reservation_id=reservation_id, amount=amount, idempotency_key=idempotency_key)
-        
-        target_res = ReservationRepository.get_reservation(reservation_id)
-        if not target_res:
-            raise ValueError(f"Reservation '{reservation_id}' not found.")
+        Create a safe Stripe Sandbox payment link.
 
-        # Check existing payment for idempotency
+        The payment link is created in mock sandbox mode.
+
+        Args:
+            reservation_id: Reservation identifier.
+            amount: Amount to charge.
+            currency: Payment currency.
+            idempotency_key: Unique operation key.
+
+        Returns:
+            JSON-safe payment payload.
+        """
+        idempotency_key = (
+            idempotency_key
+            or f"idem_pay_{reservation_id}"
+        )
+
+        currency = currency.lower()
+
+        logger.info(
+            "payment_create_link_called",
+            reservation_id=reservation_id,
+            amount=amount,
+            currency=currency,
+            idempotency_key=idempotency_key,
+        )
+
+        target_reservation = ReservationRepository.get_reservation(
+            reservation_id
+        )
+
+        if not target_reservation:
+            raise ValueError(
+                f"Reservation '{reservation_id}' not found."
+            )
+
         payments = PaymentRepository.list_payments()
-        for pay in payments:
-            if pay["reservation_id"] == reservation_id and pay["status"] == "PENDING":
-                logger.info("Pending payment session already exists", payment_id=pay["payment_id"])
+
+        for payment in payments:
+            if (
+                payment.get("reservation_id") == reservation_id
+                and payment.get("status") == "PENDING"
+            ):
+                logger.info(
+                    "pending_payment_already_exists",
+                    payment_id=payment["payment_id"],
+                    reservation_id=reservation_id,
+                )
+
                 return {
-                    "payment_id": pay["payment_id"],
-                    "payment_link": pay["payment_link"],
-                    "payment_session_id": pay["payment_session_id"],
-                    "status": pay["status"]
+                    "payment_id": payment["payment_id"],
+                    "reservation_id": reservation_id,
+                    "payment_link": payment["payment_link"],
+                    "payment_session_id": payment["payment_session_id"],
+                    "amount": payment.get("amount", amount),
+                    "currency": payment.get("currency", currency),
+                    "status": payment["status"],
+                    "idempotency_key": payment.get(
+                        "idempotency_key",
+                        idempotency_key,
+                    ),
                 }
 
-        # Mock Stripe payment details
-        mock_sess_id = f"demo-session-00{len(payments) + 1}"
-        mock_pay_id = f"pay_00{len(payments) + 1}"
-        fake_payment_link = f"https://sandbox.stripe.com/pay/demo-payment-00{len(payments) + 1}"
+        stripe_client = StripeSandboxClient()
 
-        # Register transaction log via repository
+        checkout_session = stripe_client.create_checkout_session(
+            reservation_id=reservation_id,
+            amount=amount,
+            currency=currency,
+            idempotency_key=idempotency_key,
+        )
+
+        payment_id = f"pay_{len(payments) + 1:03d}"
+        payment_session_id = checkout_session["id"]
+        payment_link = checkout_session["url"]
+
+        now = datetime.utcnow().isoformat() + "Z"
+
         new_payment = {
-            "payment_id": mock_pay_id,
+            "payment_id": payment_id,
             "reservation_id": reservation_id,
             "amount": amount,
-            "currency": "usd",
+            "currency": currency,
             "status": "PENDING",
-            "payment_session_id": mock_sess_id,
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z"
+            "payment_link": payment_link,
+            "payment_session_id": payment_session_id,
+            "idempotency_key": idempotency_key,
+            "provider": "stripe_sandbox",
+            "created_at": now,
+            "updated_at": now,
         }
+
         PaymentRepository.create_payment(new_payment)
 
-        # Update reservation details in repository and change state
-        target_res["payment_link"] = fake_payment_link
-        target_res["payment_session_id"] = mock_sess_id
-        target_res["updated_at"] = datetime.utcnow().isoformat() + "Z"
-        ReservationRepository.update_reservation(reservation_id, target_res)
+        target_reservation["payment_link"] = payment_link
+        target_reservation["payment_session_id"] = payment_session_id
+        target_reservation["updated_at"] = now
 
-        # Transition the reservation to PENDING_PAYMENT state
-        ReservationService.change_reservation_state(reservation_id, "PENDING_PAYMENT")
+        ReservationRepository.update_reservation(
+            reservation_id,
+            target_reservation,
+        )
 
-        logger.info("Created payment checkout session link", payment_id=mock_pay_id, payment_link=fake_payment_link)
-        
-        # Structured log requirement
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "PENDING_PAYMENT",
+        )
+
         logger.info(
-            "State transition details",
+            "payment_link_created",
             reservation_id=reservation_id,
-            payment_id=mock_pay_id,
+            payment_id=payment_id,
+            payment_session_id=payment_session_id,
             current_state="PRICE_CALCULATED",
             next_state="PENDING_PAYMENT",
-            timestamp=datetime.utcnow().isoformat() + "Z"
+            currency=currency,
+            timestamp=now,
         )
 
         return {
-            "payment_id": mock_pay_id,
-            "payment_link": fake_payment_link,
-            "payment_session_id": mock_sess_id,
-            "status": "PENDING"
+            "payment_id": payment_id,
+            "reservation_id": reservation_id,
+            "payment_link": payment_link,
+            "payment_session_id": payment_session_id,
+            "amount": amount,
+            "currency": currency,
+            "status": "PENDING",
+            "idempotency_key": idempotency_key,
         }
 
     @staticmethod
-    def get_payment_status(payment_id: str) -> Optional[Dict[str, Any]]:
+    def get_payment_status(
+        payment_id: str,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves the payment status from storage.
+        Retrieve payment status from mock storage.
         """
-        logger.info("Service: get_payment_status called", payment_id=payment_id)
+        logger.info(
+            "payment_status_requested",
+            payment_id=payment_id,
+        )
+
         return PaymentRepository.get_payment(payment_id)
 
     @staticmethod
-    def mark_payment_completed(payment_session_id: str) -> Dict[str, Any]:
+    def mark_payment_completed(
+        payment_session_id: str,
+    ) -> Dict[str, Any]:
         """
-        Simulates callback verification when Stripe Sandbox succeeds.
-        Transitions state: PENDING_PAYMENT -> PAID -> RESERVATION_CONFIRMED
+        Simulate Stripe webhook confirmation.
+
+        State transition:
+            PENDING_PAYMENT -> PAID -> RESERVATION_CONFIRMED
         """
-        logger.info("Service: mark_payment_completed invoked", payment_session_id=payment_session_id)
-        
-        target_payment = PaymentRepository.get_payment_by_session_id(payment_session_id)
+        logger.info(
+            "payment_mark_completed_called",
+            payment_session_id=payment_session_id,
+        )
+
+        target_payment = PaymentRepository.get_payment_by_session_id(
+            payment_session_id
+        )
+
         if not target_payment:
-            raise ValueError(f"Payment session with id '{payment_session_id}' not found.")
-        
-        # Update Payment transaction record to COMPLETED
+            raise ValueError(
+                f"Payment session '{payment_session_id}' not found."
+            )
+
+        now = datetime.utcnow().isoformat() + "Z"
+
         target_payment["status"] = "COMPLETED"
-        target_payment["updated_at"] = datetime.utcnow().isoformat() + "Z"
-        PaymentRepository.update_payment(target_payment["payment_id"], target_payment)
+        target_payment["updated_at"] = now
+
+        PaymentRepository.update_payment(
+            target_payment["payment_id"],
+            target_payment,
+        )
 
         reservation_id = target_payment["reservation_id"]
-        
-        # Sequentially transition states
-        ReservationService.change_reservation_state(reservation_id, "PAID")
-        ReservationService.change_reservation_state(reservation_id, "RESERVATION_CONFIRMED")
 
-        logger.info("Payment captured. Reservation confirmed active", reservation_id=reservation_id)
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "PAID",
+        )
+
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "RESERVATION_CONFIRMED",
+        )
+
+        logger.info(
+            "payment_completed_reservation_confirmed",
+            reservation_id=reservation_id,
+            payment_id=target_payment["payment_id"],
+            payment_session_id=payment_session_id,
+            timestamp=now,
+        )
+
         return {
             "payment_id": target_payment["payment_id"],
             "reservation_id": reservation_id,
             "status": "COMPLETED",
-            "updated_at": target_payment["updated_at"]
+            "currency": target_payment.get("currency", "usd"),
+            "updated_at": now,
         }
 
     @staticmethod
-    def issue_refund(payment_session_id: str, amount: float) -> Dict[str, Any]:
+    def issue_refund(
+        payment_session_id: str,
+        amount: float,
+        currency: str = "usd",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Performs refund transaction cancellation.
-        Transitions reservation state to REFUNDED.
+        Issue a mock refund and transition reservation to REFUNDED.
         """
-        logger.info("Service: issue_refund called", payment_session_id=payment_session_id, amount=amount)
-        
-        target_payment = PaymentRepository.get_payment_by_session_id(payment_session_id)
+        idempotency_key = (
+            idempotency_key
+            or f"idem_refund_{payment_session_id}"
+        )
+
+        currency = currency.lower()
+
+        logger.info(
+            "payment_issue_refund_called",
+            payment_session_id=payment_session_id,
+            amount=amount,
+            currency=currency,
+            idempotency_key=idempotency_key,
+        )
+
+        target_payment = PaymentRepository.get_payment_by_session_id(
+            payment_session_id
+        )
+
         if not target_payment:
-            raise ValueError(f"Completed payment session '{payment_session_id}' not found.")
+            raise ValueError(
+                f"Payment session '{payment_session_id}' not found."
+            )
 
-        # Update payment transaction record to REFUNDED
+        stripe_client = StripeSandboxClient()
+
+        refund = stripe_client.refund_payment(
+            charge_id=target_payment["payment_id"],
+            amount=amount,
+            currency=currency,
+            idempotency_key=idempotency_key,
+        )
+
+        now = datetime.utcnow().isoformat() + "Z"
+
         target_payment["status"] = "REFUNDED"
-        target_payment["updated_at"] = datetime.utcnow().isoformat() + "Z"
-        PaymentRepository.update_payment(target_payment["payment_id"], target_payment)
+        target_payment["updated_at"] = now
 
-        # Transition reservation state to REFUNDED
+        PaymentRepository.update_payment(
+            target_payment["payment_id"],
+            target_payment,
+        )
+
         reservation_id = target_payment["reservation_id"]
-        ReservationService.change_reservation_state(reservation_id, "REFUNDED")
+
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "REFUNDED",
+        )
+
+        logger.info(
+            "payment_refunded",
+            reservation_id=reservation_id,
+            payment_id=target_payment["payment_id"],
+            refund_id=refund["id"],
+            timestamp=now,
+        )
 
         return {
             "payment_id": target_payment["payment_id"],
             "reservation_id": reservation_id,
+            "refund_id": refund["id"],
             "amount_refunded": amount,
-            "status": "REFUNDED"
+            "currency": currency,
+            "status": "REFUNDED",
+            "idempotency_key": idempotency_key,
         }
