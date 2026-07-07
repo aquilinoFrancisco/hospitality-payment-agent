@@ -17,6 +17,7 @@ Design principles:
 from __future__ import annotations
 
 import os
+
 from pydantic import BaseModel
 
 
@@ -89,13 +90,20 @@ class Settings(BaseModel):
         "mock-384",
     )
 
+    DEFAULT_EMBEDDING_DIMENSIONS: int = int(
+        os.getenv(
+            "DEFAULT_EMBEDDING_DIMENSIONS",
+            "384",
+        )
+    )
+
     SUPPORTED_EMBEDDING_PROVIDERS: list[str] = [
         "mock",
         "openai",
-        "huggingface",
-        "ollama",
-        "voyage",
         "gemini",
+        "huggingface",
+        "voyage",
+        "ollama",
     ]
 
     # ---------------------------------------------------------
@@ -295,7 +303,7 @@ class Settings(BaseModel):
         """
         Validate whether an LLM provider is supported.
         """
-        return provider.lower() in self.SUPPORTED_LLM_PROVIDERS
+        return provider.lower().strip() in self.SUPPORTED_LLM_PROVIDERS
 
     def get_default_llm_provider(self) -> str:
         """
@@ -308,6 +316,33 @@ class Settings(BaseModel):
         Return the configured default LLM model.
         """
         return self.DEFAULT_LLM_MODEL
+
+    def is_supported_embedding_provider(
+        self,
+        provider: str,
+    ) -> bool:
+        """
+        Validate whether an embedding provider is supported.
+        """
+        return provider.lower().strip() in self.SUPPORTED_EMBEDDING_PROVIDERS
+
+    def get_default_embedding_provider(self) -> str:
+        """
+        Return the configured default embedding provider.
+        """
+        return self.DEFAULT_EMBEDDING_PROVIDER
+
+    def get_default_embedding_model(self) -> str:
+        """
+        Return the configured default embedding model.
+        """
+        return self.DEFAULT_EMBEDDING_MODEL
+
+    def get_default_embedding_dimensions(self) -> int:
+        """
+        Return the configured embedding dimensions.
+        """
+        return self.DEFAULT_EMBEDDING_DIMENSIONS
 
 
 settings = Settings()
