@@ -1,12 +1,82 @@
+
 # Hospitality Reservation Payment Agent
+
+## A Provider-Agnostic Agentic AI Platform Reference Architecture
 
 ## Overview
 
-Hospitality Reservation Payment Agent is an AI Agent platform demonstrating a modern, event-driven reservation workflow for hotels.
+Hospitality Reservation Payment Agent is a reference implementation of a modern **Provider-Agnostic Agentic AI Platform**.
 
-The project showcases how LangGraph, CrewAI, MCP Tools, FastAPI, Local RAG and multiple payment providers can be combined into a modular, auditable and production-ready architecture.
+Although the current business domain focuses on hotel reservations and payments, the architectural patterns are intentionally designed to be reusable across different enterprise AI solutions.
 
-The project is intentionally implemented as an MVP using mock data while preserving enterprise architecture patterns.
+The platform demonstrates how modern AI orchestration frameworks can collaborate with traditional software engineering patterns to build scalable, maintainable, and auditable business systems.
+
+Instead of tightly coupling the application to specific AI models, payment gateways, vector databases, or embedding providers, every external capability is abstracted through Routers and Factories.
+
+This allows business workflows to remain stable while providers evolve independently.
+
+Current implementation demonstrates:
+
+- LangGraph as the decision engine
+- CrewAI as domain specialists
+- MCP Tools as controlled business capabilities
+- Provider Routers for capability selection
+- Provider Factories for implementation selection
+- Local RAG for enterprise knowledge retrieval
+- Repository + Service architecture
+- Event-driven payment confirmation
+
+The project is intentionally implemented as an MVP using mock providers while preserving enterprise architecture patterns.
+
+---
+
+# Architectural Principles
+
+The platform follows four architectural principles.
+
+### 1. LangGraph is the Decision Engine
+
+LangGraph orchestrates the business workflow and decides what should happen next according to the current workflow state.
+
+It never communicates directly with vendors.
+
+---
+
+### 2. Routers Select Capabilities
+
+Routers determine which provider or capability should execute a specific task.
+
+Examples:
+
+- Payment Router
+- LLM Router
+- Embedding Router
+- Vector Store Router
+
+Routers isolate orchestration from implementation details.
+
+---
+
+### 3. Factories Instantiate Providers
+
+Factories create the correct implementation without exposing vendor-specific SDKs to the business workflow.
+
+Examples:
+
+- Payment Provider Factory
+- LLM Provider Factory
+- Embedding Provider Factory
+- Vector Store Factory
+
+Adding a new provider becomes an extension instead of a rewrite.
+
+---
+
+### 4. Services Execute Business Rules
+
+Business Services enforce domain rules, persistence, idempotency, and state transitions.
+
+External providers never contain business logic.
 
 ---
 
@@ -20,138 +90,162 @@ Build an AI Agent platform capable of:
 - Consulting hotel policies using Local RAG
 - Generating secure payment links
 - Supporting multiple payment providers
+- Supporting multiple LLM providers
+- Supporting multiple embedding providers
+- Supporting multiple vector stores
 - Receiving webhook confirmations
 - Maintaining a fully auditable workflow
 
-The AI agent never charges customers 
+The AI agent never charges customers directly.
 
-___
+It only orchestrates business capabilities through controlled MCP Tools.
+
+---
 
 # Architecture
 
 ```text
-                    Client
-                       │
-                       ▼
-                  FastAPI API
-                       │
-            ┌──────────┴──────────┐
-            ▼                     ▼
-       REST Endpoints        SSE Streaming
-            │                     │
-            └──────────┬──────────┘
-                       ▼
-                  LangGraph
-                       │
-                       ▼
-                  CrewAI Crew
-                       │
-                       ▼
-                 MCP Tool Server
-                       │
-                       ▼
-                Business Services
-                       │
-        ┌──────────────┼──────────────────────┐
-        ▼              ▼                      ▼
- Local RAG     Payment Provider Factory   LLM Provider Factory
-        │              │                      │
-        │      ┌───────┼──────────────┐       ├───────────────┬───────────────┬──────────────┬──────────────┬──────────────┐
-        │      ▼       ▼              ▼       ▼               ▼               ▼              ▼              ▼
-        │   Stripe  Conekta    Mercado Pago Gemini         OpenAI         Claude         Llama        Ollama   HuggingFace
-```        
-
----
-
-# Technology Stack
-
-- Python 3.11
-- FastAPI
-- LangGraph
-- CrewAI
-- MCP-style Tools
-- Local RAG
-- Mock JSON Repository
-- Structured Logging
-- Stripe Sandbox
-- Conekta Sandbox
-- Mercado Pago Sandbox
-- LLM Provider Factory
-- Mock LLM Providers
-
-Architecture prepared for:
-
-- OpenAI
-- Claude
-- Gemini
-- Llama
-- HuggingFace
-- Ollama
-- Voyage AI
-
----
-
-# Main Features
-
-- AI Reservation Workflow
-- Multi-step LangGraph orchestration
-- CrewAI collaborative agents
-- Local RAG policy retrieval
-- Provider-agnostic payment architecture
-- Multi-country payment configuration
-- Idempotent payment operations
-- Webhook-driven state transitions
-- Structured logging
-- Repository pattern
-- Service layer
-- MCP Tool abstraction
-
----
-
-# Current Workflow
+                          Client
+                             │
+                             ▼
+                        FastAPI API
+                             │
+                  ┌──────────┴──────────┐
+                  ▼                     ▼
+             REST Endpoints       SSE Streaming
+                  │                     │
+                  └──────────┬──────────┘
+                             ▼
+                        LangGraph
+                    (Decision Engine)
+                             │
+                             ▼
+                     CrewAI Specialists
+                             │
+                             ▼
+                       MCP Tool Server
+                  (Controlled AI Actions)
+                             │
+                             ▼
+                     Business Services
+                             │
+        ┌────────────────────┼────────────────────┐
+        ▼                    ▼                    ▼
+  Payment Router        LLM Router      VectorStore Router
+        │                    │                    │
+        ▼                    ▼                    ▼
+Payment Provider      LLM Provider      VectorStore Factory
+     Factory              Factory              │
+        │                    │                 │
+ ┌──────┼──────────┐     ┌────┼──────────────┐  ├──────────────┬──────────────┬──────────────┬──────────────┐
+ ▼      ▼          ▼     ▼    ▼      ▼      ▼  ▼              ▼              ▼              ▼
+Stripe Conekta Mercado Gemini OpenAI Claude Llama Memory      FAISS      PGVector   OpenSearch Pinecone
+Pago                    Ollama HuggingFace
+                             │
+                             ▼
+                    Embedding Router
+                             │
+                             ▼
+                  Embedding Provider Factory
+                             │
+          ┌───────────┬────────────┬────────────┬────────────┐
+          ▼           ▼            ▼            ▼
+      OpenAI     HuggingFace    Gemini      Voyage AI
+                                  │
+                                  ▼
+                               Ollama
+```
+# Project Structure
 
 ```text
-Reservation Request
-        │
-        ▼
-Validate Request
-        ▼
-Check Availability
-        ▼
-Calculate Price
-        ▼
-Retrieve Hotel Policies (RAG)
-        ▼
-Reservation Agent
-        ▼
-Payment Agent
-        ▼
-Generate Payment Link
-        ▼
-Customer Payment
-        ▼
-Webhook
-        ▼
-Reservation Confirmed
+hospitality-reservation-payment-agent/
+│
+├── app/                    # FastAPI application and API endpoints
+│
+├── graph/                  # LangGraph decision engine
+│   ├── workflow.py
+│   ├── state.py
+│   ├── llm_router.py
+│   └── prompts.py
+│
+├── crew/                   # CrewAI specialist agents
+│
+├── agent_mcp/              # MCP Tool Server
+│   ├── server.py
+│   └── tools/
+│
+├── services/               # Business services
+│
+├── repositories/           # Repository pattern
+│
+├── integrations/
+│   │
+│   ├── llm/
+│   │   ├── router.py
+│   │   ├── factory.py
+│   │   ├── base.py
+│   │   └── providers/
+│   │
+│   ├── payments/
+│   │   ├── router.py
+│   │   ├── factory.py
+│   │   ├── base.py
+│   │   └── providers/
+│   │
+│   ├── embeddings/         # (Roadmap)
+│   │   ├── router.py
+│   │   ├── factory.py
+│   │   └── providers/
+│   │
+│   └── vector_store/       # (Roadmap)
+│       ├── router.py
+│       ├── factory.py
+│       └── providers/
+│
+├── rag/                    # Retrieval-Augmented Generation
+│
+├── knowledge_base/         # Local knowledge base
+│
+├── mock_data/              # Mock repositories
+│
+├── docs/                   # Architecture documentation
+│
+└── tests/                  # Unit and integration tests
 ```
 
 ---
 
-# Project Structure
+## Architectural Layers
 
 ```text
-app/
-graph/
-crew/
-agent_mcp/
-services/
-repositories/
-integrations/
-rag/
-knowledge_base/
-mock_data/
-docs/
-tests/
+Presentation Layer
+    └── FastAPI
+
+Decision Layer
+    ├── LangGraph
+    └── CrewAI
+
+Capability Layer
+    ├── MCP Tools
+    ├── Payment Router
+    ├── LLM Router
+    ├── Embedding Router (Roadmap)
+    └── VectorStore Router (Roadmap)
+
+Provider Layer
+    ├── Payment Provider Factory
+    ├── LLM Provider Factory
+    ├── Embedding Provider Factory
+    └── VectorStore Factory
+
+Business Layer
+    ├── Services
+    └── Repositories
+
+Knowledge Layer
+    ├── Local RAG
+    ├── Knowledge Base
+    └── Mock Data
 ```
 
 ---
