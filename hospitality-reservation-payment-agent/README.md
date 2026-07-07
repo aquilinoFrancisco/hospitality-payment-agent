@@ -23,43 +23,43 @@ Build an AI Agent platform capable of:
 - Receiving webhook confirmations
 - Maintaining a fully auditable workflow
 
-The AI agent never charges customers directly.
+The AI agent never charges customers 
 
----
+___
 
 # Architecture
 
 ```text
-                Client
-                   │
-                   ▼
-              FastAPI API
-                   │
-        ┌──────────┴──────────┐
-        ▼                     ▼
-   REST Endpoints        SSE Streaming
-        │                     │
-        └──────────┬──────────┘
-                   ▼
-              LangGraph
-                   │
-                   ▼
-               CrewAI Crew
-                   │
-                   ▼
-              MCP Tool Server
-                   │
-                   ▼
-            Business Services
-                   │
-         ┌─────────┴─────────┐
-         ▼                   ▼
-      Local RAG      Payment Providers
-                              │
-             ┌────────────────┼───────────────┐
-             ▼                ▼               ▼
-          Stripe          Conekta      Mercado Pago
-```
+                    Client
+                       │
+                       ▼
+                  FastAPI API
+                       │
+            ┌──────────┴──────────┐
+            ▼                     ▼
+       REST Endpoints        SSE Streaming
+            │                     │
+            └──────────┬──────────┘
+                       ▼
+                  LangGraph
+                       │
+                       ▼
+                  CrewAI Crew
+                       │
+                       ▼
+                 MCP Tool Server
+                       │
+                       ▼
+                Business Services
+                       │
+        ┌──────────────┼──────────────────────┐
+        ▼              ▼                      ▼
+ Local RAG     Payment Provider Factory   LLM Provider Factory
+        │              │                      │
+        │      ┌───────┼──────────────┐       ├───────────────┬───────────────┬──────────────┬──────────────┬──────────────┐
+        │      ▼       ▼              ▼       ▼               ▼               ▼              ▼              ▼
+        │   Stripe  Conekta    Mercado Pago Gemini         OpenAI         Claude         Llama        Ollama   HuggingFace
+```        
 
 ---
 
@@ -76,6 +76,8 @@ The AI agent never charges customers directly.
 - Stripe Sandbox
 - Conekta Sandbox
 - Mercado Pago Sandbox
+- LLM Provider Factory
+- Mock LLM Providers
 
 Architecture prepared for:
 
@@ -171,36 +173,59 @@ Detailed documentation is available under the `docs/` directory.
 
 Current implementation includes:
 
-- Mock reservation workflow
-- Local JSON repositories
-- LangGraph orchestration
-- CrewAI agents
-- MCP tools
-- Multi-provider payment abstraction
-- Stripe Sandbox integration
-- Conekta-ready architecture
-- Mercado Pago-ready architecture
+- LangGraph workflow orchestration
+- CrewAI collaborative agents
+- MCP Tool Server
+- Provider-Agnostic Payment Factory
+- Multi-provider payments (Stripe, Conekta, Mercado Pago)
+- LLM Provider Factory
+- Mock LLM Providers
+  - Gemini
+  - OpenAI
+  - Claude
+  - Llama
+  - Ollama
+  - HuggingFace
 - Local RAG
-- Structured logging
+- Repository Pattern
+- Service Layer
+- Structured Logging
+- JSON Mock Repositories
 
 ---
 
 # Future Roadmap
 
-Upcoming iterations will include:
+## AI Platform Evolution
 
-- LLM Provider Factory
+- AI Provider Selection Engine
 - Embedding Provider Factory
 - Vector Store Factory
-- Dynamic LangGraph routing
+
+## Intelligent Orchestration
+
+- Dynamic LangGraph Routing
+- Multi-Agent Collaboration
+- Event-Driven Workflows
+- Human-in-the-Loop Approval
+
+## Business Automation
+
 - Notification Agent
-- Email integration
-- WhatsApp integration
-- SMS integration
-- CRM integration
-- Housekeeping integration
-- Invoice generation
-- Production payment gateways
+- Email Integration
+- WhatsApp Integration
+- SMS Integration
+- CRM Integration
+- Housekeeping Integration
+- Invoice Generation
+
+## Enterprise Capabilities
+
+- Multi-Tenant Architecture
+- Observability Dashboard
+- Analytics & Reporting
+- Kubernetes Deployment
+- CI/CD Pipeline
 
 ---
 
