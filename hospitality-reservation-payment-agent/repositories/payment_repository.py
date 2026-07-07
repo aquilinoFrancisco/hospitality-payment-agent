@@ -97,7 +97,7 @@ class PaymentRepository:
 
         for payment in _load_payments():
 
-            if payment["payment_id"] == payment_id:
+            if payment.get("payment_id") == payment_id:
                 return payment
 
         return None
@@ -155,7 +155,7 @@ class PaymentRepository:
 
         for index, payment in enumerate(payments):
 
-            if payment["payment_id"] == payment_id:
+            if payment.get("payment_id") == payment_id:
 
                 payments[index] = payment_data
 
