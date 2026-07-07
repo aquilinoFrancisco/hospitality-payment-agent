@@ -1,18 +1,19 @@
 # app/api/webhooks.py
 """
-Stripe Sandbox Webhook endpoints.
+Payment Provider Webhook endpoints.
 
-This module receives asynchronous payment notifications.
+This module receives asynchronous notifications from payment providers.
 
-Current MVP:
-    - Mock webhook validation
-    - Structured logging
-    - Reservation state simulation
+Supported providers:
 
-Future:
-    - Stripe SDK signature verification
-    - Reservation persistence
-    - Event replay protection
+- stripe
+- conekta
+- mercado_pago
+
+Business rule:
+
+Webhooks are the only source of truth for payment confirmation.
+The AI agent never marks a payment as completed.
 """
 
 from __future__ import annotations
@@ -20,82 +21,103 @@ from __future__ import annotations
 import json
 
 import structlog
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Path, Request
 
 logger = structlog.get_logger()
 
 router = APIRouter()
 
+SUPPORTED_PROVIDERS = {
+    "stripe",
+    "conekta",
+    "mercado_pago",
+}
 
-@router.post("/stripe")
-async def stripe_webhook(
-    request: Request,
-    stripe_signature: str | None = Header(
+
+@router.post("/{provider}")
+async def payment_webhook(
+    provider: str = Path(...),
+    request: Request = None,
+    provider_signature: str | None = Header(
         default=None,
-        alias="Stripe-Signature",
+        alias="Payment-Signature",
     ),
 ):
     """
-    Stripe webhook endpoint.
+    Generic payment webhook.
 
-    In production this endpoint will:
+    Future:
 
-    1. Verify Stripe signature.
-    2. Parse the event.
-    3. Update reservation state.
-    4. Persist payment information.
-    5. Return HTTP 200 immediately.
+    Stripe
+        Verify Stripe signature
+
+    Conekta
+        Verify webhook signature
+
+    Mercado Pago
+        Verify notification authenticity
+
+    Then:
+
+        Update payment
+
+        Update reservation
+
+        Trigger reservation confirmation
     """
+
+    provider = provider.lower()
+
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unsupported provider: {provider}",
+        )
 
     body = await request.body()
 
     logger.info(
-        "stripe_webhook_received",
-        signature_present=stripe_signature is not None,
+        "payment_webhook_received",
+        provider=provider,
+        signature_present=provider_signature is not None,
     )
 
-    # ---------------------------------------------------------
-    # MVP
-    # ---------------------------------------------------------
-
     try:
-
         event = json.loads(body.decode())
 
     except Exception:
 
         event = {
-            "type": "checkout.session.completed",
+            "type": "payment.completed",
             "data": {},
         }
 
     event_type = event.get(
         "type",
-        "checkout.session.completed",
+        "payment.completed",
     )
 
     logger.info(
-        "stripe_event_processed",
+        "payment_event_processed",
+        provider=provider,
         event_type=event_type,
     )
 
     #
-    # Future implementation
+    # Future
     #
-    # event = stripe.Webhook.construct_event(
-    #     payload=body,
-    #     sig_header=stripe_signature,
-    #     secret=WEBHOOK_SECRET,
-    # )
+    # provider.verify_signature(...)
     #
-    # reservation_service.confirm_payment(...)
+    # PaymentService.mark_payment_completed(...)
+    #
+    # ReservationService.confirm(...)
     #
 
     return {
         "status": "success",
-        "provider": "Stripe Sandbox",
+        "provider": provider,
         "event_type": event_type,
         "reservation_state": "PAID",
         "next_state": "RESERVATION_CONFIRMED",
-        "source_of_truth": "Stripe Webhook",
+        "source_of_truth": f"{provider} webhook",
     }
