@@ -52,11 +52,26 @@ class Settings(BaseModel):
         "gemini-2.5-flash",
     )
 
+    DEFAULT_LLM_TEMPERATURE: float = float(
+        os.getenv(
+            "DEFAULT_LLM_TEMPERATURE",
+            "0.2",
+        )
+    )
+
+    DEFAULT_LLM_MAX_TOKENS: int = int(
+        os.getenv(
+            "DEFAULT_LLM_MAX_TOKENS",
+            "1024",
+        )
+    )
+
     SUPPORTED_LLM_PROVIDERS: list[str] = [
         "gemini",
         "openai",
         "claude",
         "llama",
+        "ollama",
         "huggingface",
     ]
 
@@ -247,6 +262,10 @@ class Settings(BaseModel):
         os.getenv("ENABLE_NOTIFICATIONS", "false").lower() == "true"
     )
 
+    # ---------------------------------------------------------
+    # Helper methods
+    # ---------------------------------------------------------
+
     def get_provider_for_country(self, country_code: str | None = None) -> str:
         """
         Return the preferred payment provider for a country.
@@ -268,6 +287,27 @@ class Settings(BaseModel):
             country,
             self.DEFAULT_CURRENCY,
         )
+
+    def is_supported_llm_provider(
+        self,
+        provider: str,
+    ) -> bool:
+        """
+        Validate whether an LLM provider is supported.
+        """
+        return provider.lower() in self.SUPPORTED_LLM_PROVIDERS
+
+    def get_default_llm_provider(self) -> str:
+        """
+        Return the configured default LLM provider.
+        """
+        return self.DEFAULT_LLM_PROVIDER
+
+    def get_default_llm_model(self) -> str:
+        """
+        Return the configured default LLM model.
+        """
+        return self.DEFAULT_LLM_MODEL
 
 
 settings = Settings()
