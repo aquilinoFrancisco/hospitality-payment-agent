@@ -344,5 +344,30 @@ class Settings(BaseModel):
         """
         return self.DEFAULT_EMBEDDING_DIMENSIONS
 
+    def 
+is_supported_vector_store(
+        self,
+        provider: str,
+    ) -> bool:
+        """
+        Validate whether a vector store provider is supported.
+        """
+        return (
+            provider.lower().strip()
+            in self.SUPPORTED_VECTOR_STORES
+        )
+
+    def get_default_vector_store_provider(self) -> str:
+        """
+        Return the configured default vector store provider.
+        """
+        return self.VECTOR_STORE_PROVIDER
+
+    def is_rag_enabled(self) -> bool:
+        """
+        Return whether Local RAG is enabled.
+        """
+        return self.ENABLE_RAG
+
 
 settings = Settings()
