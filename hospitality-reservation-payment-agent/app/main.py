@@ -8,6 +8,7 @@ This API exposes:
 - Server-Sent Events (SSE) reservation streaming
 - Multi-provider payment webhooks
 - Provider-agnostic payment architecture
+- Provider-agnostic LLM architecture
 
 Current architecture:
 
@@ -21,9 +22,9 @@ MCP Tools
     ↓
 Business Services
     ↓
-Payment Provider Factory
+Provider Factories
     ↓
-Stripe / Conekta / Mercado Pago
+Payment Providers / LLM Providers
 """
 
 from __future__ import annotations
@@ -44,8 +45,9 @@ app = FastAPI(
     title="Hospitality Reservation Payment Agent",
     description=(
         "AI Agent Platform for hospitality reservations using "
-        "FastAPI, LangGraph, CrewAI, MCP Tools, Local RAG and "
-        "a provider-agnostic payment architecture."
+        "FastAPI, LangGraph, CrewAI, MCP Tools, Local RAG, "
+        "Provider-Agnostic Payment Factory and "
+        "Provider-Agnostic LLM Factory."
     ),
     version=APP_VERSION,
 )
@@ -58,65 +60,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------------------------------------------------------------
-# REST API
-# ------------------------------------------------------------------
-
-app.include_router(
-    api_router,
-    prefix="/api",
-    tags=["API"],
-)
-
-# ------------------------------------------------------------------
-# Streaming API (SSE)
-# ------------------------------------------------------------------
-
-app.include_router(
-    stream_router,
-    tags=["Streaming"],
-)
-
-# ------------------------------------------------------------------
-# Payment Webhooks
-# ------------------------------------------------------------------
-
-app.include_router(
-    webhook_router,
-    prefix="/webhooks",
-    tags=["Payment Webhooks"],
-)
+app.include_router(api_router, prefix="/api", tags=["API"])
+app.include_router(stream_router, tags=["Streaming"])
+app.include_router(webhook_router, prefix="/webhooks", tags=["Payment Webhooks"])
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """
-    Application startup.
-    """
-
     logger.info(
         "application_starting",
         service="hospitality-reservation-payment-agent",
         version=APP_VERSION,
         mode="mvp",
         architecture="provider-agnostic",
+        payment_factory="enabled",
+        llm_factory="enabled",
     )
 
 
 @app.get("/health")
 async def health_check() -> dict:
-    """
-    Health endpoint.
-
-    Useful for:
-    - Kubernetes
-    - Docker
-    - Azure App Service
-    - AWS ECS
-    - Cloud Run
-    - Monitoring systems
-    """
-
     return {
         "status": "healthy",
         "service": "hospitality-reservation-payment-agent",
@@ -127,6 +90,14 @@ async def health_check() -> dict:
             "conekta",
             "mercado_pago",
         ],
+        "llm_providers": [
+            "gemini",
+            "openai",
+            "claude",
+            "llama",
+            "ollama",
+            "huggingface",
+        ],
         "capabilities": [
             "FastAPI",
             "LangGraph Workflow",
@@ -135,6 +106,8 @@ async def health_check() -> dict:
             "Local RAG",
             "Server Sent Events",
             "Multi-provider Payments",
+            "LLM Provider Factory",
+            "Mock LLM Providers",
             "Webhook Confirmation",
             "Repository Pattern",
             "Service Layer",
@@ -144,6 +117,9 @@ async def health_check() -> dict:
             "currency": "configurable",
             "country": "configurable",
             "llm_provider": "configurable",
+            "llm_model": "configurable",
+            "llm_temperature": "configurable",
+            "llm_max_tokens": "configurable",
             "embedding_provider": "configurable",
         },
     }
