@@ -5,6 +5,11 @@ Server-Sent Events endpoints.
 This module streams the reservation workflow progress to the client.
 For the MVP, the stream emits deterministic workflow milestones and uses
 MCP tools for the payment-link step.
+
+Payment provider strategy:
+- Default provider is stripe.
+- Supported providers: stripe, conekta, mercado_pago.
+- The agent never charges directly; it only creates a payment link.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ import json
 from typing import Any, AsyncGenerator, Dict
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -24,6 +29,12 @@ from rag.retriever import retrieve_relevant_policies
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+SUPPORTED_PAYMENT_PROVIDERS = {
+    "stripe",
+    "conekta",
+    "mercado_pago",
+}
 
 
 class ReservationStreamRequest(BaseModel):
@@ -40,6 +51,11 @@ class ReservationStreamRequest(BaseModel):
     idempotency_key: str = Field(
         default="idem_res_mvp_001",
         example="idem_res_mvp_001",
+    )
+    provider: str = Field(
+        default="stripe",
+        example="stripe",
+        description="Payment provider: stripe, conekta, mercado_pago",
     )
 
 
@@ -69,6 +85,19 @@ async def reserve_stream(
         pending_payment
     """
 
+    provider = request.provider.lower().strip()
+
+    if provider not in SUPPORTED_PAYMENT_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Unsupported payment provider",
+                "supported_providers": sorted(
+                    SUPPORTED_PAYMENT_PROVIDERS
+                ),
+            },
+        )
+
     async def event_generator() -> AsyncGenerator[str, None]:
         server = MCPServer()
 
@@ -76,6 +105,7 @@ async def reserve_stream(
             logger.info(
                 "reservation_stream_started",
                 reservation_id=request.reservation_id,
+                provider=provider,
             )
 
             yield sse_event(
@@ -83,6 +113,7 @@ async def reserve_stream(
                 {
                     "reservation_id": request.reservation_id,
                     "status": "started",
+                    "payment_provider": provider,
                 },
             )
 
@@ -95,6 +126,7 @@ async def reserve_stream(
                     "message": "Reservation request validated.",
                     "customer_id": request.customer_id,
                     "room_id": request.room_id,
+                    "payment_provider": provider,
                 },
             )
 
@@ -118,6 +150,7 @@ async def reserve_stream(
                     {
                         "status": "ROOM_NOT_AVAILABLE",
                         "reservation_id": request.reservation_id,
+                        "payment_provider": provider,
                     },
                 )
                 return
@@ -140,7 +173,10 @@ async def reserve_stream(
             await asyncio.sleep(0.5)
 
             policies = retrieve_relevant_policies(
-                query="hotel payment cancellation refund policy",
+                query=(
+                    f"hotel payment cancellation refund policy "
+                    f"provider {provider}"
+                ),
                 limit=2,
             )
 
@@ -148,6 +184,7 @@ async def reserve_stream(
                 "load_policy_context",
                 {
                     "status": "completed",
+                    "payment_provider": provider,
                     "policies_found": len(policies),
                     "policies": policies,
                 },
@@ -160,6 +197,7 @@ async def reserve_stream(
                 reservation_id=request.reservation_id,
                 amount=pricing.get("total_price", 0),
                 currency=pricing.get("currency", "USD"),
+                provider=provider,
             )
 
             yield sse_event(
@@ -174,6 +212,7 @@ async def reserve_stream(
                 {
                     "status": "PENDING_PAYMENT",
                     "reservation_id": request.reservation_id,
+                    "payment_provider": provider,
                     "payment_link": payment.get("payment_link"),
                     "idempotency_key": payment.get(
                         "idempotency_key",
@@ -181,7 +220,8 @@ async def reserve_stream(
                     ),
                     "safety_rule": (
                         "The agent never charges directly. "
-                        "Customer payment happens in Stripe Sandbox."
+                        "Customer payment happens through the configured "
+                        "payment provider."
                     ),
                 },
             )
@@ -189,12 +229,14 @@ async def reserve_stream(
             logger.info(
                 "reservation_stream_completed",
                 reservation_id=request.reservation_id,
+                provider=provider,
             )
 
         except Exception as exc:
             logger.error(
                 "reservation_stream_failed",
                 reservation_id=request.reservation_id,
+                provider=provider,
                 error=str(exc),
             )
 
@@ -203,6 +245,7 @@ async def reserve_stream(
                 {
                     "status": "error",
                     "message": "Reservation workflow failed.",
+                    "payment_provider": provider,
                 },
             )
 
