@@ -9,18 +9,19 @@ details to RAG, LangGraph, services or business workflows.
 from __future__ import annotations
 
 from integrations.embeddings.base import EmbeddingProvider
+from integrations.embeddings.mock_provider import MockEmbeddingProvider
 
 
 class EmbeddingProviderFactory:
     """
     Factory responsible for creating embedding provider implementations.
-
-    Providers will be registered as they are implemented.
     """
 
     DEFAULT_PROVIDER = "mock"
 
-    _PROVIDERS = {}
+    _PROVIDERS = {
+        "mock": MockEmbeddingProvider,
+    }
 
     @classmethod
     def create(cls, provider: str | None = None) -> EmbeddingProvider:
@@ -29,7 +30,7 @@ class EmbeddingProviderFactory:
         provider_class = cls._PROVIDERS.get(selected_provider)
 
         if provider_class is None:
-            supported = ", ".join(sorted(cls._PROVIDERS.keys())) or "none"
+            supported = ", ".join(sorted(cls._PROVIDERS.keys()))
 
             raise ValueError(
                 f"Unsupported embedding provider '{selected_provider}'. "
