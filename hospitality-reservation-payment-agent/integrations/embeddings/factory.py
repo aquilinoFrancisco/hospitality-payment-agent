@@ -9,7 +9,15 @@ details to RAG, LangGraph, services or business workflows.
 from __future__ import annotations
 
 from integrations.embeddings.base import EmbeddingProvider
+
 from integrations.embeddings.mock_provider import MockEmbeddingProvider
+from integrations.embeddings.openai_provider import OpenAIEmbeddingProvider
+from integrations.embeddings.gemini_provider import GeminiEmbeddingProvider
+from integrations.embeddings.huggingface_provider import (
+    HuggingFaceEmbeddingProvider,
+)
+from integrations.embeddings.voyage_provider import VoyageEmbeddingProvider
+from integrations.embeddings.ollama_provider import OllamaEmbeddingProvider
 
 
 class EmbeddingProviderFactory:
@@ -21,11 +29,22 @@ class EmbeddingProviderFactory:
 
     _PROVIDERS = {
         "mock": MockEmbeddingProvider,
+        "openai": OpenAIEmbeddingProvider,
+        "gemini": GeminiEmbeddingProvider,
+        "huggingface": HuggingFaceEmbeddingProvider,
+        "voyage": VoyageEmbeddingProvider,
+        "ollama": OllamaEmbeddingProvider,
     }
 
     @classmethod
     def create(cls, provider: str | None = None) -> EmbeddingProvider:
-        selected_provider = (provider or cls.DEFAULT_PROVIDER).lower().strip()
+        """
+        Return an embedding provider implementation.
+        """
+
+        selected_provider = (
+            provider or cls.DEFAULT_PROVIDER
+        ).lower().strip()
 
         provider_class = cls._PROVIDERS.get(selected_provider)
 
@@ -41,4 +60,8 @@ class EmbeddingProviderFactory:
 
     @classmethod
     def supported_providers(cls) -> list[str]:
+        """
+        Return all supported embedding providers.
+        """
+
         return sorted(cls._PROVIDERS.keys())
