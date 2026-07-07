@@ -1,28 +1,37 @@
 # rag/vector_store.py
 """
-Vector Store abstraction for the Hospitality Reservation Payment Agent.
+RAG Vector Store Service.
 
-Current implementation:
-    - In-memory vector store for MVP demos.
+This module keeps backward compatibility with the original RAG vector store
+interface while delegating vector storage and semantic retrieval to the new
+provider-agnostic VectorStoreRouter.
 
-Future implementations:
-    - PGVector
-    - OpenSearch
-    - FAISS
-    - Pinecone
-    - Weaviate
-    - Elasticsearch
+Architecture:
 
-Design principle:
-    The retriever and LangGraph workflow should depend only on the public
-    VectorStore interface, not on a specific provider.
+RAG / Retriever
+      ↓
+rag.vector_store wrapper
+      ↓
+VectorStoreRouter
+      ↓
+VectorStoreFactory
+      ↓
+Vector Store Providers
+
+Supported providers:
+- memory
+- faiss
+- pgvector
+- opensearch
+- pinecone
 """
 
 from __future__ import annotations
 
-import math
-from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+
+from core.config import settings
+from integrations.vector_store import VectorStoreRouter
 
 
 Vector = List[float]
@@ -30,15 +39,25 @@ Metadata = Dict[str, Any]
 SearchResult = Dict[str, Any]
 
 
-class VectorStore(ABC):
+class VectorStore:
     """
-    Abstract vector store contract.
+    Backward-compatible vector store wrapper.
 
-    Any future provider must implement this interface so the retriever and
-    workflow do not need to change.
+    Existing RAG code can still call:
+
+        add_document()
+        search()
+
+    Internally, this wrapper delegates all operations to VectorStoreRouter.
     """
 
-    @abstractmethod
+    def __init__(
+        self,
+        provider: Optional[str] = None,
+    ) -> None:
+        self.provider = provider or settings.VECTOR_STORE_PROVIDER
+        self.router = VectorStoreRouter(provider=self.provider)
+
     def add_document(
         self,
         doc_id: str,
@@ -46,336 +65,143 @@ class VectorStore(ABC):
         embedding: Vector,
         metadata: Optional[Metadata] = None,
     ) -> None:
-        """Add a document chunk to the vector store."""
+        """
+        Add a document chunk to the configured vector store.
+        """
 
-    @abstractmethod
+        self.router.upsert_documents(
+            documents=[
+                {
+                    "id": doc_id,
+                    "text": content,
+                    "embedding": embedding,
+                    "metadata": metadata or {},
+                }
+            ],
+            metadata={
+                "source": "rag.vector_store",
+            },
+        )
+
     def search(
         self,
         query_embedding: Vector,
         top_k: int = 3,
         filters: Optional[Metadata] = None,
     ) -> List[SearchResult]:
-        """Search similar document chunks."""
+        """
+        Search similar document chunks.
+        """
+
+        result = self.router.similarity_search(
+            query_embedding=query_embedding,
+            top_k=top_k,
+            filters=filters,
+        )
+
+        return [
+            {
+                "id": item.get("id"),
+                "content": item.get("text"),
+                "metadata": item.get("metadata", {}),
+                "score": item.get("score", 0.0),
+            }
+            for item in result.get("results", [])
+        ]
+
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Return vector store health metadata.
+        """
+
+        return self.router.health_check()
 
 
 class SimpleVectorStore(VectorStore):
     """
-    Simple in-memory vector store for local MVP execution.
-
-    This is intentionally lightweight and requires no external services.
+    Backward-compatible alias for the in-memory vector store.
     """
 
     def __init__(self) -> None:
-        self.documents: List[SearchResult] = []
-
-    def add_document(
-        self,
-        doc_id: str,
-        content: str,
-        embedding: Vector,
-        metadata: Optional[Metadata] = None,
-    ) -> None:
-        """
-        Add a document chunk to memory.
-        """
-        self.documents.append(
-            {
-                "id": doc_id,
-                "content": content,
-                "embedding": embedding,
-                "metadata": metadata or {},
-            }
-        )
-
-    def search(
-        self,
-        query_embedding: Vector,
-        top_k: int = 3,
-        filters: Optional[Metadata] = None,
-    ) -> List[SearchResult]:
-        """
-        Search the most similar chunks using cosine similarity.
-        """
-        scored_documents: List[SearchResult] = []
-
-        for document in self.documents:
-            if filters and not _matches_filters(
-                document.get("metadata", {}),
-                filters,
-            ):
-                continue
-
-            score = cosine_similarity(
-                query_embedding,
-                document["embedding"],
-            )
-
-            scored_documents.append(
-                {
-                    "id": document["id"],
-                    "content": document["content"],
-                    "metadata": document.get("metadata", {}),
-                    "score": score,
-                }
-            )
-
-        scored_documents.sort(
-            key=lambda item: item["score"],
-            reverse=True,
-        )
-
-        return scored_documents[:top_k]
+        super().__init__(provider="memory")
 
 
-class PGVectorStore(VectorStore):
+def get_vector_store(
+    provider: Optional[str] = None,
+) -> VectorStore:
     """
-    Future PGVector implementation.
+    Return a backward-compatible vector store wrapper.
 
-    Intended production usage:
-        - PostgreSQL
-        - pgvector extension
-        - indexed embedding column
-        - metadata filtering
+    Existing code can still call:
+
+        get_vector_store("memory")
+
+    Internally, this now delegates to:
+
+        VectorStoreRouter
+            → VectorStoreFactory
+            → VectorStoreProvider
     """
 
-    def add_document(
-        self,
-        doc_id: str,
-        content: str,
-        embedding: Vector,
-        metadata: Optional[Metadata] = None,
-    ) -> None:
-        """
-        Future implementation example:
+    selected_provider = (
+        provider
+        or settings.VECTOR_STORE_PROVIDER
+    ).lower().strip()
 
-            INSERT INTO documents (id, content, embedding, metadata)
-            VALUES (...)
-        """
-        raise NotImplementedError(
-            "PGVectorStore is not implemented in the MVP."
-        )
-
-    def search(
-        self,
-        query_embedding: Vector,
-        top_k: int = 3,
-        filters: Optional[Metadata] = None,
-    ) -> List[SearchResult]:
-        """
-        Future implementation example:
-
-            SELECT id, content, metadata,
-                   embedding <=> query_embedding AS distance
-            FROM documents
-            ORDER BY distance
-            LIMIT top_k
-        """
-        raise NotImplementedError(
-            "PGVectorStore is not implemented in the MVP."
-        )
+    return VectorStore(provider=selected_provider)
 
 
-class OpenSearchVectorStore(VectorStore):
+def upsert_documents(
+    documents: List[Dict[str, Any]],
+    provider: Optional[str] = None,
+    metadata: Optional[Metadata] = None,
+) -> Dict[str, Any]:
     """
-    Future OpenSearch implementation.
-
-    Useful for:
-        - hybrid search
-        - keyword + vector search
-        - enterprise search use cases
+    Upsert embedded documents through the provider-agnostic router.
     """
 
-    def add_document(
-        self,
-        doc_id: str,
-        content: str,
-        embedding: Vector,
-        metadata: Optional[Metadata] = None,
-    ) -> None:
-        """
-        Future implementation should index content, embedding, and metadata
-        into an OpenSearch index.
-        """
-        raise NotImplementedError(
-            "OpenSearchVectorStore is not implemented in the MVP."
-        )
+    router = VectorStoreRouter(
+        provider=provider or settings.VECTOR_STORE_PROVIDER,
+    )
 
-    def search(
-        self,
-        query_embedding: Vector,
-        top_k: int = 3,
-        filters: Optional[Metadata] = None,
-    ) -> List[SearchResult]:
-        """
-        Future implementation should use kNN search and optional metadata
-        filters.
-        """
-        raise NotImplementedError(
-            "OpenSearchVectorStore is not implemented in the MVP."
-        )
-
-
-class FAISSVectorStore(VectorStore):
-    """
-    Future FAISS implementation.
-
-    Useful for:
-        - local high-speed vector search
-        - offline demos
-        - private deployments
-    """
-
-    def add_document(
-        self,
-        doc_id: str,
-        content: str,
-        embedding: Vector,
-        metadata: Optional[Metadata] = None,
-    ) -> None:
-        """
-        Future implementation should add the vector to a FAISS index and keep
-        metadata in a sidecar mapping.
-        """
-        raise NotImplementedError(
-            "FAISSVectorStore is not implemented in the MVP."
-        )
-
-    def search(
-        self,
-        query_embedding: Vector,
-        top_k: int = 3,
-        filters: Optional[Metadata] = None,
-    ) -> List[SearchResult]:
-        """
-        Future implementation should perform nearest-neighbor search using
-        FAISS and return normalized SearchResult dictionaries.
-        """
-        raise NotImplementedError(
-            "FAISSVectorStore is not implemented in the MVP."
-        )
-
-
-class PineconeVectorStore(VectorStore):
-    """
-    Future Pinecone implementation.
-
-    Useful for:
-        - managed cloud vector search
-        - scalable retrieval
-        - production RAG APIs
-    """
-
-    def add_document(
-        self,
-        doc_id: str,
-        content: str,
-        embedding: Vector,
-        metadata: Optional[Metadata] = None,
-    ) -> None:
-        """
-        Future implementation should upsert vectors into a Pinecone index.
-        """
-        raise NotImplementedError(
-            "PineconeVectorStore is not implemented in the MVP."
-        )
-
-    def search(
-        self,
-        query_embedding: Vector,
-        top_k: int = 3,
-        filters: Optional[Metadata] = None,
-    ) -> List[SearchResult]:
-        """
-        Future implementation should query Pinecone and normalize results into
-        the SearchResult contract.
-        """
-        raise NotImplementedError(
-            "PineconeVectorStore is not implemented in the MVP."
-        )
-
-
-def get_vector_store(provider: str = "memory") -> VectorStore:
-    """
-    Vector store factory.
-
-    Current:
-        provider="memory"
-
-    Future:
-        provider="pgvector"
-        provider="opensearch"
-        provider="faiss"
-        provider="pinecone"
-
-    Returns:
-        VectorStore implementation.
-    """
-    provider = provider.lower().strip()
-
-    if provider == "memory":
-        return SimpleVectorStore()
-
-    if provider == "pgvector":
-        return PGVectorStore()
-
-    if provider == "opensearch":
-        return OpenSearchVectorStore()
-
-    if provider == "faiss":
-        return FAISSVectorStore()
-
-    if provider == "pinecone":
-        return PineconeVectorStore()
-
-    raise ValueError(
-        f"Unsupported vector store provider: {provider}"
+    return router.upsert_documents(
+        documents=documents,
+        metadata=metadata or {
+            "source": "rag.vector_store",
+        },
     )
 
 
-def cosine_similarity(
-    vector_a: Vector,
-    vector_b: Vector,
-) -> float:
+def similarity_search(
+    query_embedding: Vector,
+    top_k: int = 3,
+    provider: Optional[str] = None,
+    filters: Optional[Metadata] = None,
+) -> Dict[str, Any]:
     """
-    Calculate cosine similarity between two vectors.
+    Execute semantic similarity search through the configured vector store.
     """
-    if not vector_a or not vector_b:
-        return 0.0
 
-    length = min(len(vector_a), len(vector_b))
-
-    a = vector_a[:length]
-    b = vector_b[:length]
-
-    dot_product = sum(
-        x * y
-        for x, y in zip(a, b)
+    router = VectorStoreRouter(
+        provider=provider or settings.VECTOR_STORE_PROVIDER,
     )
 
-    norm_a = math.sqrt(
-        sum(x * x for x in a)
+    return router.similarity_search(
+        query_embedding=query_embedding,
+        top_k=top_k,
+        filters=filters,
     )
 
-    norm_b = math.sqrt(
-        sum(y * y for y in b)
+
+def get_vector_store_metadata(
+    provider: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Return current vector store configuration metadata.
+    """
+
+    router = VectorStoreRouter(
+        provider=provider or settings.VECTOR_STORE_PROVIDER,
     )
 
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-
-    return dot_product / (norm_a * norm_b)
-
-
-def _matches_filters(
-    metadata: Metadata,
-    filters: Metadata,
-) -> bool:
-    """
-    Check whether document metadata matches all requested filters.
-    """
-    for key, expected_value in filters.items():
-
-        if metadata.get(key) != expected_value:
-            return False
-
-    return True
+    return router.health_check()
