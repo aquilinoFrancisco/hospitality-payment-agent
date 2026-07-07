@@ -33,7 +33,7 @@ class ReservationRepository:
     def get_reservation(reservation_id: str) -> Optional[Dict[str, Any]]:
         reservations = _load_reservations()
         for r in reservations:
-            if r["reservation_id"] == reservation_id:
+           if r.get("reservation_id") == reservation_id: 
                 return r
         return None
 
@@ -48,7 +48,7 @@ class ReservationRepository:
     def update_reservation(reservation_id: str, reservation_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         reservations = _load_reservations()
         for i, r in enumerate(reservations):
-            if r["reservation_id"] == reservation_id:
+            if r.get("reservation_id") == reservation_id:
                 reservations[i] = reservation_data
                 _save_reservations(reservations)
                 return reservation_data
