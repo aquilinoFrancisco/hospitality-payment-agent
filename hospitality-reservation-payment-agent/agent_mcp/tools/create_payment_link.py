@@ -5,11 +5,6 @@ MCP Tool: create_payment_link.
 This tool creates a safe payment link for a reservation using a configurable
 payment provider.
 
-Supported providers:
-- stripe
-- conekta
-- mercado_pago
-
 Business rule:
 The AI agent never charges the customer directly.
 The agent only requests a payment link through this controlled tool.
@@ -29,25 +24,26 @@ def create_payment_link_tool(
     provider: str = "stripe",
 ) -> Dict[str, object]:
     """
-    Generate a safe payment link.
+    Generate a safe payment link through PaymentService.
 
-    Args:
-        reservation_id: Reservation identifier.
-        amount: Payment amount.
-        currency: Payment currency.
-        provider: Payment provider. Default is stripe.
-
-    Returns:
-        JSON-safe payment link payload.
+    Architecture:
+        MCP Tool
+            -> PaymentService
+            -> PaymentRouter
+            -> PaymentProviderFactory
+            -> Payment Provider
     """
 
-    idempotency_key = f"idem_pay_{provider}_{reservation_id}"
+    normalized_provider = provider.lower().strip()
+    normalized_currency = currency.lower().strip()
+
+    idempotency_key = f"idem_pay_{normalized_provider}_{reservation_id}"
 
     result = PaymentService.create_payment_link(
         reservation_id=reservation_id,
         amount=amount,
-        currency=currency,
-        provider=provider,
+        currency=normalized_currency,
+        provider=normalized_provider,
         idempotency_key=idempotency_key,
     )
 
