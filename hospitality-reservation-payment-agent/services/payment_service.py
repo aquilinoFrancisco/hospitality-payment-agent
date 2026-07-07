@@ -171,8 +171,14 @@ class PaymentService:
         )
 
         payment_id = provider_response["payment_id"]
-        payment_session_id = payment_id
-        payment_link = provider_response["payment_link"]
+
+payment_session_id = (
+    provider_response.get("payment_session_id")
+    or provider_response.get("raw_provider_response", {}).get("id")
+    or payment_id
+)
+
+payment_link = provider_response["payment_link"]
 
         now = datetime.utcnow().isoformat() + "Z"
 
