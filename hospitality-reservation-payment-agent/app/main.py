@@ -3,9 +3,27 @@
 FastAPI application entrypoint.
 
 This API exposes:
+
 - REST reservation endpoints
-- Server-Sent Events reservation streaming
-- Stripe webhook placeholder endpoints
+- Server-Sent Events (SSE) reservation streaming
+- Multi-provider payment webhooks
+- Provider-agnostic payment architecture
+
+Current architecture:
+
+FastAPI
+    ↓
+LangGraph
+    ↓
+CrewAI
+    ↓
+MCP Tools
+    ↓
+Business Services
+    ↓
+Payment Provider Factory
+    ↓
+Stripe / Conekta / Mercado Pago
 """
 
 from __future__ import annotations
@@ -20,13 +38,16 @@ from app.api.webhooks import router as webhook_router
 
 logger = structlog.get_logger()
 
+APP_VERSION = "1.0.0"
+
 app = FastAPI(
     title="Hospitality Reservation Payment Agent",
     description=(
-        "AI agentic platform for hotel reservations, safe payment-link "
-        "generation, local RAG policies, MCP-style tools, and SSE streaming."
+        "AI Agent Platform for hospitality reservations using "
+        "FastAPI, LangGraph, CrewAI, MCP Tools, Local RAG and "
+        "a provider-agnostic payment architecture."
     ),
-    version="0.8.0",
+    version=APP_VERSION,
 )
 
 app.add_middleware(
@@ -37,56 +58,92 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ------------------------------------------------------------------
 # REST API
+# ------------------------------------------------------------------
+
 app.include_router(
     api_router,
     prefix="/api",
-    tags=["api"],
+    tags=["API"],
 )
 
-# SSE streaming API
+# ------------------------------------------------------------------
+# Streaming API (SSE)
+# ------------------------------------------------------------------
+
 app.include_router(
     stream_router,
-    tags=["streaming"],
+    tags=["Streaming"],
 )
 
-# Stripe webhook placeholder
+# ------------------------------------------------------------------
+# Payment Webhooks
+# ------------------------------------------------------------------
+
 app.include_router(
     webhook_router,
     prefix="/webhooks",
-    tags=["webhooks"],
+    tags=["Payment Webhooks"],
 )
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
     """
-    Application startup hook.
+    Application startup.
     """
+
     logger.info(
         "application_starting",
         service="hospitality-reservation-payment-agent",
-        version="0.8.0",
+        version=APP_VERSION,
         mode="mvp",
+        architecture="provider-agnostic",
     )
 
 
 @app.get("/health")
 async def health_check() -> dict:
     """
-    Root health check.
+    Health endpoint.
+
+    Useful for:
+    - Kubernetes
+    - Docker
+    - Azure App Service
+    - AWS ECS
+    - Cloud Run
+    - Monitoring systems
     """
+
     return {
         "status": "healthy",
         "service": "hospitality-reservation-payment-agent",
-        "version": "0.8.0",
+        "version": APP_VERSION,
+        "architecture": "provider-agnostic",
+        "payment_providers": [
+            "stripe",
+            "conekta",
+            "mercado_pago",
+        ],
         "capabilities": [
             "FastAPI",
-            "MCP-style tools",
-            "LangGraph-ready workflow",
-            "CrewAI-ready agents",
-            "Local RAG policies",
-            "SSE streaming",
-            "Stripe Sandbox-ready payments",
+            "LangGraph Workflow",
+            "CrewAI Agents",
+            "MCP Tools",
+            "Local RAG",
+            "Server Sent Events",
+            "Multi-provider Payments",
+            "Webhook Confirmation",
+            "Repository Pattern",
+            "Service Layer",
         ],
+        "configuration": {
+            "payment_provider": "configurable",
+            "currency": "configurable",
+            "country": "configurable",
+            "llm_provider": "configurable",
+            "embedding_provider": "configurable",
+        },
     }
