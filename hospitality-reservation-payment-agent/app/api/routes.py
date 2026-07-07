@@ -5,6 +5,12 @@ REST API routes for the Hospitality Reservation Payment Agent.
 This layer exposes simple REST endpoints for the MVP.
 Business logic stays in services and repositories.
 Payment execution is not performed here.
+
+Payment provider strategy:
+- The API accepts an optional provider parameter.
+- Default provider is "stripe".
+- Supported providers: stripe, conekta, mercado_pago.
+- The agent never charges directly; it only creates a payment link.
 """
 
 from __future__ import annotations
@@ -20,6 +26,12 @@ from rag.retriever import retrieve_relevant_policies
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+SUPPORTED_PAYMENT_PROVIDERS = {
+    "stripe",
+    "conekta",
+    "mercado_pago",
+}
 
 
 @router.get("/rooms")
@@ -75,6 +87,7 @@ async def get_reservation(reservation_id: str) -> Dict[str, Any]:
         "customer_email": "aquilino.francisco@gmail.com",
         "room_type": "deluxe-suite",
         "status": "PENDING_PAYMENT",
+        "payment_provider": "stripe",
         "payment_link": (
             f"https://checkout.stripe.com/pay/mock_session_{reservation_id}"
         ),
@@ -97,8 +110,18 @@ async def create_reservation(payload: Dict[str, Any]) -> Dict[str, Any]:
             "room_id": "deluxe-suite",
             "check_in": "2026-08-10",
             "check_out": "2026-08-12",
-            "guests": 2
+            "guests": 2,
+            "provider": "stripe"
         }
+
+    Provider is optional.
+    Default provider:
+        stripe
+
+    Supported providers:
+        stripe
+        conekta
+        mercado_pago
     """
     logger.info(
         "create_reservation_requested",
@@ -125,6 +148,22 @@ async def create_reservation(payload: Dict[str, Any]) -> Dict[str, Any]:
             detail={
                 "error": "Missing required fields",
                 "missing_fields": missing_fields,
+            },
+        )
+
+    provider = payload.get(
+        "provider",
+        "stripe",
+    ).lower()
+
+    if provider not in SUPPORTED_PAYMENT_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Unsupported payment provider",
+                "supported_providers": sorted(
+                    SUPPORTED_PAYMENT_PROVIDERS
+                ),
             },
         )
 
@@ -161,6 +200,7 @@ async def create_reservation(payload: Dict[str, Any]) -> Dict[str, Any]:
         reservation_id=reservation_id,
         amount=pricing.get("total_price", 0),
         currency=pricing.get("currency", "USD"),
+        provider=provider,
     )
 
     policies = retrieve_relevant_policies(
@@ -173,13 +213,15 @@ async def create_reservation(payload: Dict[str, Any]) -> Dict[str, Any]:
         "reservation_id": reservation_id,
         "customer_id": payload["customer_id"],
         "room_id": payload["room_id"],
+        "payment_provider": provider,
         "availability": availability,
         "pricing": pricing,
         "payment": payment,
         "policy_context": policies,
         "safety_rule": (
             "The agent never charges directly. "
-            "The customer must complete payment through Stripe Sandbox."
+            "The customer must complete payment through the configured "
+            "payment provider."
         ),
     }
 
