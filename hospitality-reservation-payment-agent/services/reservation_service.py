@@ -1,206 +1,427 @@
-# services/reservation_service.py
-import re
-import structlog
+# services/payment_service.py
+"""
+Payment business service.
+
+Responsibilities:
+- Apply payment business rules.
+- Validate reservation existence.
+- Enforce idempotency.
+- Persist payment ledger records.
+- Update reservation payment state.
+- Delegate provider-specific operations to PaymentRouter.
+
+Architecture:
+
+PaymentService
+      ↓
+PaymentRouter
+      ↓
+PaymentProviderFactory
+      ↓
+Stripe / Conekta / Mercado Pago
+"""
+
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from repositories.room_repository import RoomRepository
-from repositories.customer_repository import CustomerRepository
+from typing import Any, Dict, Optional
+
+import structlog
+
+from integrations.payments import PaymentRouter
+from repositories.payment_repository import PaymentRepository
 from repositories.reservation_repository import ReservationRepository
+from repositories.room_repository import RoomRepository
+from services.reservation_service import ReservationService
 
 logger = structlog.get_logger()
 
-class ReservationService:
+
+class PaymentService:
     """
-    Core reservation service enforcing business workflows.
-    Completely decoupled from transport layers and persistence details.
+    Core payment business service.
+
+    This service does not call Stripe, Conekta or Mercado Pago directly.
+    Provider selection and provider response normalization are delegated to
+    PaymentRouter.
     """
+
+    DEFAULT_PROVIDER = "stripe"
 
     @staticmethod
-    def validate_reservation_request(
-        customer_email: str,
-        room_type: str,
+    def calculate_price(
+        room_id: str,
         check_in: str,
-        check_out: str
-    ) -> List[str]:
+        check_out: str,
+    ) -> float:
         """
-        Validates the request parameters.
-        Returns a list of error strings. Empty list indicates validity.
+        Calculate reservation price based on room base price and nights.
         """
-        errors = []
-        
-        # 1. Validate email
-        if not customer_email or not re.match(r"[^@]+@[^@]+\.[^@]+", customer_email):
-            errors.append("Invalid customer email address format.")
 
-        # 2. Validate dates
+        logger.info(
+            "payment_calculate_price_called",
+            room_id=room_id,
+            check_in=check_in,
+            check_out=check_out,
+        )
+
+        room = RoomRepository.get_room(room_id)
+
+        if not room:
+            raise ValueError(f"Room type '{room_id}' not found.")
+
         try:
             date_format = "%Y-%m-%d"
             start_date = datetime.strptime(check_in, date_format)
             end_date = datetime.strptime(check_out, date_format)
-            
-            if start_date >= end_date:
-                errors.append("Check-in date must be before check-out date.")
-        except ValueError:
-            errors.append("Dates must be in YYYY-MM-DD format.")
+            nights = max(1, (end_date - start_date).days)
 
-        # 3. Validate room type
-        room = RoomRepository.get_room(room_type)
-        if not room:
-            errors.append(f"Requested room type '{room_type}' does not exist.")
+        except Exception as exc:
+            logger.warning(
+                "invalid_date_format_defaulting_to_one_night",
+                error=str(exc),
+            )
+            nights = 1
 
-        return errors
+        total_price = float(room["base_price"]) * nights
 
-    @staticmethod
-    def check_room_availability(room_id: str, check_in: str, check_out: str) -> bool:
-        """
-        Checks availability of room_id for the given date range.
-        Ensures dates are not blacklisted and that there are no overlapping active bookings.
-        """
-        # 1. Query availability calendar records
-        records = ReservationRepository.get_availability_records()
-        for rec in records:
-            if rec["room_id"] == room_id and check_in <= rec["date"] < check_out:
-                if not rec["available"]:
-                    logger.info("Room calendar blocked", room_id=room_id, date=rec["date"])
-                    return False
+        logger.info(
+            "payment_price_calculated",
+            room_id=room_id,
+            base_price=room["base_price"],
+            nights=nights,
+            total_price=total_price,
+        )
 
-        # 2. Query other overlapping reservations
-        reservations = ReservationRepository.list_reservations()
-        for res in reservations:
-            if res["room_id"] == room_id and res["reservation_state"] not in ["CANCELLED", "REFUNDED", "FAILED"]:
-                if (check_in < res["check_out"]) and (check_out > res["check_in"]):
-                    logger.info("Room conflict detected", room_id=room_id, conflict_id=res["reservation_id"])
-                    return False
-
-        return True
+        return total_price
 
     @staticmethod
-    def create_reservation(
-        customer_email: str,
-        room_type: str,
-        check_in: str,
-        check_out: str,
-        idempotency_key: str
+    def create_payment_link(
+        reservation_id: str,
+        amount: float,
+        currency: str = "usd",
+        idempotency_key: Optional[str] = None,
+        provider: str = DEFAULT_PROVIDER,
     ) -> Dict[str, Any]:
         """
-        Processes a new booking draft.
-        Enforces idempotency, input validations, customer auto-registration, and calendar availability.
+        Create a safe payment link using PaymentRouter.
+
+        Business rules:
+        - The AI agent never charges directly.
+        - The system only creates a payment link.
+        - The provider executes the payment.
+        - Webhook confirmation is the source of truth.
         """
-        logger.info("Service: create_reservation called", customer_email=customer_email, room_type=room_type, idempotency_key=idempotency_key)
 
-        # Idempotency check
-        existing_res = ReservationRepository.list_reservations()
-        for res in existing_res:
-            if res["idempotency_key"] == idempotency_key:
-                logger.info("Idempotent booking hit", reservation_id=res["reservation_id"])
-                return res
+        currency = currency.lower().strip()
+        provider = provider.lower().strip()
 
-        # Request validation
-        validation_errors = ReservationService.validate_reservation_request(customer_email, room_type, check_in, check_out)
-        if validation_errors:
-            logger.warn("Reservation request validation failed", errors=validation_errors)
-            return {
-                "reservation_id": "error",
-                "reservation_state": "FAILED",
-                "errors": validation_errors
-            }
-
-        # Check availability
-        if not ReservationService.check_room_availability(room_type, check_in, check_out):
-            logger.warn("Room unavailable for date range", room_id=room_type, check_in=check_in, check_out=check_out)
-            return {
-                "reservation_id": "error",
-                "reservation_state": "FAILED",
-                "errors": ["Requested dates are already booked or unavailable."]
-            }
-
-        # Auto-register customer if not exists
-        customer = CustomerRepository.get_customer_by_email(customer_email)
-        if not customer:
-            customers_list = CustomerRepository.get_all_customers()
-            new_cust_id = f"cust_0{len(customers_list) + 1}"
-            customer_data = {
-                "id": new_cust_id,
-                "name": customer_email.split("@")[0].title(),
-                "email": customer_email
-            }
-            CustomerRepository.create_customer(customer_data)
-            customer = customer_data
-            logger.info("Registered customer dynamically", customer_id=new_cust_id)
-
-        # Persist reservation as REQUEST_RECEIVED
-        res_list = ReservationRepository.list_reservations()
-        new_res_id = f"res_00{len(res_list) + 1}"
-        
-        reservation_record = {
-            "reservation_id": new_res_id,
-            "customer_id": customer["id"],
-            "room_id": room_type,
-            "check_in": check_in,
-            "check_out": check_out,
-            "reservation_state": "REQUEST_RECEIVED",
-            "payment_link": None,
-            "payment_session_id": None,
-            "idempotency_key": idempotency_key,
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z"
-        }
-        
-        ReservationRepository.create_reservation(reservation_record)
-        
-        # Structured logging of initial state
-        logger.info(
-            "State transition details",
-            reservation_id=new_res_id,
-            payment_id=None,
-            current_state=None,
-            next_state="REQUEST_RECEIVED",
-            timestamp=datetime.utcnow().isoformat() + "Z"
+        idempotency_key = (
+            idempotency_key
+            or f"idem_pay_{provider}_{reservation_id}"
         )
-        
-        return reservation_record
 
-    @staticmethod
-    def change_reservation_state(reservation_id: str, target_state: str) -> Dict[str, Any]:
-        """
-        Explicit State Machine Transition function.
-        Validates states and emits structured audit logs.
-        """
-        reservation = ReservationRepository.get_reservation(reservation_id)
-        if not reservation:
-            logger.error("Reservation not found for state change", reservation_id=reservation_id)
-            return {"error": "Reservation not found"}
-
-        current_state = reservation["reservation_state"]
-        
-        # Transition state
-        reservation["reservation_state"] = target_state
-        reservation["updated_at"] = datetime.utcnow().isoformat() + "Z"
-        ReservationRepository.update_reservation(reservation_id, reservation)
-
-        # Structured log: reservation_id, payment_id, current_state, next_state, timestamp
         logger.info(
-            "State transition details",
+            "payment_create_link_called",
             reservation_id=reservation_id,
-            payment_id=reservation.get("payment_session_id"),
-            current_state=current_state,
-            next_state=target_state,
-            timestamp=datetime.utcnow().isoformat() + "Z"
+            amount=amount,
+            currency=currency,
+            provider=provider,
+            idempotency_key=idempotency_key,
         )
-        return reservation
+
+        target_reservation = ReservationRepository.get_reservation(
+            reservation_id
+        )
+
+        if not target_reservation:
+            raise ValueError(
+                f"Reservation '{reservation_id}' not found."
+            )
+
+        payments = PaymentRepository.list_payments()
+
+        for payment in payments:
+            if (
+                payment.get("reservation_id") == reservation_id
+                and payment.get("status") == "PENDING"
+                and payment.get("provider", provider) == provider
+            ):
+                logger.info(
+                    "pending_payment_already_exists",
+                    payment_id=payment.get("payment_id"),
+                    reservation_id=reservation_id,
+                    provider=provider,
+                )
+
+                return {
+                    "payment_id": payment["payment_id"],
+                    "reservation_id": reservation_id,
+                    "payment_link": payment["payment_link"],
+                    "payment_session_id": payment["payment_session_id"],
+                    "amount": payment.get("amount", amount),
+                    "currency": payment.get("currency", currency),
+                    "provider": payment.get("provider", provider),
+                    "status": payment["status"],
+                    "idempotency_key": payment.get(
+                        "idempotency_key",
+                        idempotency_key,
+                    ),
+                }
+
+        payment_router = PaymentRouter(provider)
+
+        provider_response = payment_router.create_payment_link(
+            reservation_id=reservation_id,
+            amount=amount,
+            currency=currency,
+            idempotency_key=idempotency_key,
+        )
+
+        payment_id = provider_response["payment_id"]
+        payment_session_id = provider_response["payment_session_id"]
+        payment_link = provider_response["payment_link"]
+        selected_provider = provider_response["provider"]
+
+        now = datetime.utcnow().isoformat() + "Z"
+
+        new_payment = {
+            "payment_id": payment_id,
+            "reservation_id": reservation_id,
+            "amount": amount,
+            "currency": currency,
+            "provider": selected_provider,
+            "status": "PENDING",
+            "payment_link": payment_link,
+            "payment_session_id": payment_session_id,
+            "idempotency_key": idempotency_key,
+            "provider_response": provider_response,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        PaymentRepository.create_payment(new_payment)
+
+        target_reservation["payment_link"] = payment_link
+        target_reservation["payment_session_id"] = payment_session_id
+        target_reservation["payment_provider"] = selected_provider
+        target_reservation["updated_at"] = now
+
+        ReservationRepository.update_reservation(
+            reservation_id,
+            target_reservation,
+        )
+
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "PENDING_PAYMENT",
+        )
+
+        logger.info(
+            "payment_link_created",
+            reservation_id=reservation_id,
+            payment_id=payment_id,
+            payment_session_id=payment_session_id,
+            provider=selected_provider,
+            current_state="PRICE_CALCULATED",
+            next_state="PENDING_PAYMENT",
+            currency=currency,
+            timestamp=now,
+        )
+
+        return {
+            "payment_id": payment_id,
+            "reservation_id": reservation_id,
+            "payment_link": payment_link,
+            "payment_session_id": payment_session_id,
+            "amount": amount,
+            "currency": currency,
+            "provider": selected_provider,
+            "status": "PENDING",
+            "idempotency_key": idempotency_key,
+        }
 
     @staticmethod
-    def confirm_reservation(reservation_id: str) -> Dict[str, Any]:
+    def get_payment_status(
+        payment_id: str,
+        provider: str = DEFAULT_PROVIDER,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Activates reservation into RESERVATION_CONFIRMED status.
+        Retrieve local payment status and provider status through PaymentRouter.
         """
-        logger.info("Service: confirm_reservation called", reservation_id=reservation_id)
-        return ReservationService.change_reservation_state(reservation_id, "RESERVATION_CONFIRMED")
+
+        logger.info(
+            "payment_status_requested",
+            payment_id=payment_id,
+            provider=provider,
+        )
+
+        local_payment = PaymentRepository.get_payment(payment_id)
+
+        if not local_payment:
+            return None
+
+        selected_provider = local_payment.get("provider", provider)
+
+        payment_router = PaymentRouter(selected_provider)
+
+        provider_status = payment_router.get_payment_status(payment_id)
+
+        return {
+            **local_payment,
+            "provider_status": provider_status,
+        }
 
     @staticmethod
-    def cancel_reservation(reservation_id: str) -> Dict[str, Any]:
+    def mark_payment_completed(
+        payment_session_id: str,
+    ) -> Dict[str, Any]:
         """
-        Aborts active booking and sets state to CANCELLED.
+        Simulate webhook confirmation.
+
+        State transition:
+            PENDING_PAYMENT -> PAID -> RESERVATION_CONFIRMED
         """
-        logger.info("Service: cancel_reservation called", reservation_id=reservation_id)
-        return ReservationService.change_reservation_state(reservation_id, "CANCELLED")
+
+        logger.info(
+            "payment_mark_completed_called",
+            payment_session_id=payment_session_id,
+        )
+
+        target_payment = PaymentRepository.get_payment_by_session_id(
+            payment_session_id
+        )
+
+        if not target_payment:
+            raise ValueError(
+                f"Payment session '{payment_session_id}' not found."
+            )
+
+        now = datetime.utcnow().isoformat() + "Z"
+
+        target_payment["status"] = "COMPLETED"
+        target_payment["updated_at"] = now
+
+        PaymentRepository.update_payment(
+            target_payment["payment_id"],
+            target_payment,
+        )
+
+        reservation_id = target_payment["reservation_id"]
+
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "PAID",
+        )
+
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "RESERVATION_CONFIRMED",
+        )
+
+        logger.info(
+            "payment_completed_reservation_confirmed",
+            reservation_id=reservation_id,
+            payment_id=target_payment["payment_id"],
+            payment_session_id=payment_session_id,
+            provider=target_payment.get("provider"),
+            timestamp=now,
+        )
+
+        return {
+            "payment_id": target_payment["payment_id"],
+            "reservation_id": reservation_id,
+            "status": "COMPLETED",
+            "currency": target_payment.get("currency", "usd"),
+            "provider": target_payment.get("provider"),
+            "updated_at": now,
+        }
+
+    @staticmethod
+    def issue_refund(
+        payment_session_id: str,
+        amount: float,
+        currency: str = "usd",
+        idempotency_key: Optional[str] = None,
+        provider: str = DEFAULT_PROVIDER,
+    ) -> Dict[str, Any]:
+        """
+        Issue a refund using PaymentRouter.
+
+        The refund must use the same provider originally used for payment
+        whenever possible.
+        """
+
+        currency = currency.lower().strip()
+
+        idempotency_key = (
+            idempotency_key
+            or f"idem_refund_{payment_session_id}"
+        )
+
+        logger.info(
+            "payment_issue_refund_called",
+            payment_session_id=payment_session_id,
+            amount=amount,
+            currency=currency,
+            provider=provider,
+            idempotency_key=idempotency_key,
+        )
+
+        target_payment = PaymentRepository.get_payment_by_session_id(
+            payment_session_id
+        )
+
+        if not target_payment:
+            raise ValueError(
+                f"Payment session '{payment_session_id}' not found."
+            )
+
+        selected_provider = target_payment.get("provider", provider)
+
+        payment_router = PaymentRouter(selected_provider)
+
+        refund = payment_router.refund_payment(
+            payment_id=target_payment["payment_id"],
+            amount=amount,
+            currency=currency,
+            idempotency_key=idempotency_key,
+        )
+
+        now = datetime.utcnow().isoformat() + "Z"
+
+        target_payment["status"] = "REFUNDED"
+        target_payment["updated_at"] = now
+        target_payment["refund"] = refund
+
+        PaymentRepository.update_payment(
+            target_payment["payment_id"],
+            target_payment,
+        )
+
+        reservation_id = target_payment["reservation_id"]
+
+        ReservationService.change_reservation_state(
+            reservation_id,
+            "REFUNDED",
+        )
+
+        logger.info(
+            "payment_refunded",
+            reservation_id=reservation_id,
+            payment_id=target_payment["payment_id"],
+            refund_id=refund["refund_id"],
+            provider=selected_provider,
+            timestamp=now,
+        )
+
+        return {
+            "payment_id": target_payment["payment_id"],
+            "reservation_id": reservation_id,
+            "refund_id": refund["refund_id"],
+            "amount_refunded": amount,
+            "currency": currency,
+            "provider": selected_provider,
+            "status": "REFUNDED",
+            "idempotency_key": idempotency_key,
+        }
