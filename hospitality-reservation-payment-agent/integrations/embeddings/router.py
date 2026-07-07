@@ -30,6 +30,9 @@ logger = structlog.get_logger()
 class EmbeddingRouter:
     """
     Router for provider-agnostic embedding operations.
+
+    The RAG pipeline should call this router instead of calling
+    embedding providers directly.
     """
 
     def __init__(
@@ -43,7 +46,9 @@ class EmbeddingRouter:
 
         self.model = model or settings.DEFAULT_EMBEDDING_MODEL
 
-        self.provider = EmbeddingProviderFactory.create(self.provider_name)
+        self.provider = EmbeddingProviderFactory.create(
+            self.provider_name
+        )
 
         logger.info(
             "embedding_router_initialized",
@@ -56,6 +61,9 @@ class EmbeddingRouter:
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """
+        Generate one embedding vector.
+        """
         return self.provider.generate_embedding(
             text=text,
             model=self.model,
@@ -67,6 +75,9 @@ class EmbeddingRouter:
         texts: List[str],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """
+        Generate multiple embedding vectors.
+        """
         return self.provider.generate_embeddings(
             texts=texts,
             model=self.model,
@@ -74,6 +85,9 @@ class EmbeddingRouter:
         )
 
     def health_check(self) -> Dict[str, Any]:
+        """
+        Return router and provider health information.
+        """
         return {
             "router": "embedding_router",
             "provider": self.provider_name,
