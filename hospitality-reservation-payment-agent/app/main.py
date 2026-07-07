@@ -12,19 +12,29 @@ This API exposes:
 
 Current architecture:
 
-FastAPI
-    ↓
-LangGraph
-    ↓
-CrewAI
-    ↓
-MCP Tools
-    ↓
-Business Services
-    ↓
-Provider Factories
-    ↓
-Payment Providers / LLM Providers
+                    FastAPI
+                       │
+                       ▼
+                  LangGraph
+                       │
+                       ▼
+                    CrewAI
+                       │
+                       ▼
+                   MCP Tools
+                       │
+                       ▼
+               Business Services
+                       │
+          ┌────────────┴────────────┐
+          ▼                         ▼
+    Payment Router             LLM Router
+          │                         │
+          ▼                         ▼
+Payment Provider Factory    LLM Provider Factory
+          │                         │
+          ▼                         ▼
+ Stripe / Conekta / MP     Gemini / OpenAI / Claude
 """
 
 from __future__ import annotations
@@ -46,8 +56,8 @@ app = FastAPI(
     description=(
         "AI Agent Platform for hospitality reservations using "
         "FastAPI, LangGraph, CrewAI, MCP Tools, Local RAG, "
-        "Provider-Agnostic Payment Factory and "
-        "Provider-Agnostic LLM Factory."
+        "Payment Router, Payment Provider Factory, "
+        "LLM Router and LLM Provider Factory."
     ),
     version=APP_VERSION,
 )
@@ -60,26 +70,70 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api", tags=["API"])
-app.include_router(stream_router, tags=["Streaming"])
-app.include_router(webhook_router, prefix="/webhooks", tags=["Payment Webhooks"])
+# ---------------------------------------------------------
+# REST API
+# ---------------------------------------------------------
+
+app.include_router(
+    api_router,
+    prefix="/api",
+    tags=["API"],
+)
+
+# ---------------------------------------------------------
+# Streaming API (SSE)
+# ---------------------------------------------------------
+
+app.include_router(
+    stream_router,
+    tags=["Streaming"],
+)
+
+# ---------------------------------------------------------
+# Payment Webhooks
+# ---------------------------------------------------------
+
+app.include_router(
+    webhook_router,
+    prefix="/webhooks",
+    tags=["Payment Webhooks"],
+)
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    """
+    Application startup.
+    """
+
     logger.info(
         "application_starting",
         service="hospitality-reservation-payment-agent",
         version=APP_VERSION,
         mode="mvp",
         architecture="provider-agnostic",
+        payment_router="enabled",
         payment_factory="enabled",
+        llm_router="enabled",
         llm_factory="enabled",
     )
 
 
 @app.get("/health")
 async def health_check() -> dict:
+    """
+    Platform health endpoint.
+
+    Useful for:
+
+    - Kubernetes
+    - Docker
+    - Azure App Service
+    - AWS ECS
+    - Google Cloud Run
+    - Monitoring systems
+    """
+
     return {
         "status": "healthy",
         "service": "hospitality-reservation-payment-agent",
@@ -105,7 +159,10 @@ async def health_check() -> dict:
             "MCP Tools",
             "Local RAG",
             "Server Sent Events",
+            "Payment Router",
+            "Payment Provider Factory",
             "Multi-provider Payments",
+            "LLM Router",
             "LLM Provider Factory",
             "Mock LLM Providers",
             "Webhook Confirmation",
@@ -121,5 +178,6 @@ async def health_check() -> dict:
             "llm_temperature": "configurable",
             "llm_max_tokens": "configurable",
             "embedding_provider": "configurable",
+            "vector_store_provider": "configurable",
         },
     }
