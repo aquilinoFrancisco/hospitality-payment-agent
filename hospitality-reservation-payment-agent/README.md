@@ -1,139 +1,218 @@
-# Hospitality Reservation & Payment AI Agent Platform
+# Hospitality Reservation Payment Agent
 
-[![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-green.svg)](https://fastapi.tiangolo.com)
-[![Stripe Sandbox](https://img.shields.io/badge/Stripe-Sandbox-635BFF.svg)](https://stripe.com)
+## Overview
 
-An elegant agentic system engineered for **secured, auditable room reservation checkouts** using **LangGraph**, **CrewAI**, **MCP tools**, and **Stripe Sandbox integrations**.
+Hospitality Reservation Payment Agent is an AI Agent platform demonstrating a modern, event-driven reservation workflow for hotels.
 
-> 💡 *Note: This repository is structured as a premium technical portfolio presentation for system design and advanced engineering showcases.*
+The project showcases how LangGraph, CrewAI, MCP Tools, FastAPI, Local RAG and multiple payment providers can be combined into a modular, auditable and production-ready architecture.
 
-## 🚀 Key Architectural Principles
-- **Indirect Checkout Integration**: The conversational AI NEVER holds or requests primary cardholder numbers directly in raw inputs.
-- **Strict Webhook Source of Truth**: State machine transitions are entirely driven by cryptographically-verified Stripe signature events (`checkout.session.completed`).
-- **Decoupled Business Services**: Multi-Agent configurations invoke external actions through standard MCP (Model Context Protocol) specifications.
-- **Idempotent Operations**: All workflows must provide unique idempotency keys before executing a sandbox transaction.
+The project is intentionally implemented as an MVP using mock data while preserving enterprise architecture patterns.
 
 ---
 
-## 📂 Repository Layout
-- `app/`: FastAPI controllers, routers, SSE endpoints, and webhooks.
-- `services/`: Framework-agnostic pure business logic layer housing domain rules, validation, pricing calculators, and state machine transitions (`reservation_service.py`, `payment_service.py`).
-- `repositories/`: Pure data access layer handling low-level loading and persistent serialization of JSON datasets under `mock_data/` (`room_repository.py`, `customer_repository.py`, `reservation_repository.py`, `payment_repository.py`). Strictly free of business rules.
-- `integrations/`: Third-party integration packages (e.g., Stripe Sandbox API client).
-- `core/`: Application settings, environment configuration, and structured logging.
-- `graph/`: LangGraph definitions specifying state transitions and policy evaluations.
-- `crew/`: CrewAI execution parameters (ReservationAgent & PaymentAgent specifications).
-- `agent_mcp/`: Decoupled, fully implemented MCP Tools Layer (Phase 4 completed). Features `MCPServer` tool registry class and 8 structural business tools.
-- `rag/`: semantic lookup module querying in-memory vectors.
-- `knowledge_base/`: policy guidelines in pure markdown.
-- `models/`: pydantic validation schemas.
-- `mock_data/`: lightweight database presets.
+# Business Goal
+
+Build an AI Agent platform capable of:
+
+- Validating reservation requests
+- Checking room availability
+- Calculating reservation pricing
+- Consulting hotel policies using Local RAG
+- Generating secure payment links
+- Supporting multiple payment providers
+- Receiving webhook confirmations
+- Maintaining a fully auditable workflow
+
+The AI agent never charges customers directly.
 
 ---
 
-## 💼 Business Domain & Workflow Lifecycles (Phase 2)
+# Architecture
 
-This system establishes a clean, framework-agnostic hotel booking and payment domain. All core processes are driven by deterministic state changes and decoupled business logic.
-
-### 🏢 1. Core Business Entities
-- **Room**: Represents lodging options (e.g., *Deluxe Suite*, *Panoramic Penthouse*). Includes properties for unique `id`, `name`, capacity, and daily `base_price`.
-- **Customer**: Represents a customer account with their unique `id`, `name`, and contact `email`.
-- **Reservation**: Connects a customer with a room type for a specified duration, capturing the active state machine status, total cost, metadata pointers (`idempotency_key`), and Stripe tracking parameters (`payment_link`, `payment_session_id`).
-- **Payment**: Tracks transactional statuses (`PENDING`, `COMPLETED`, `REFUNDED`, `FAILED`) associated with Stripe Checkout sessions.
-
----
-
-### 🔄 2. State Machine Lifecycle Transitions
-
-The reservation flow is strictly guided through deterministic states to guarantee consistent audit trails:
-
-```
-  [REQUEST_RECEIVED]
-          ↓
-     [VALIDATED]
-          ↓
-[AVAILABILITY_CONFIRMED]
-          ↓
-  [PRICE_CALCULATED]
-          ↓
-   [PENDING_PAYMENT]   ───► [FAILED]
-          ↓
-        [PAID]         ───► [REFUNDED]
-          ↓
-[RESERVATION_CONFIRMED] ───► [CANCELLED]
+```text
+                Client
+                   │
+                   ▼
+              FastAPI API
+                   │
+        ┌──────────┴──────────┐
+        ▼                     ▼
+   REST Endpoints        SSE Streaming
+        │                     │
+        └──────────┬──────────┘
+                   ▼
+              LangGraph
+                   │
+                   ▼
+               CrewAI Crew
+                   │
+                   ▼
+              MCP Tool Server
+                   │
+                   ▼
+            Business Services
+                   │
+         ┌─────────┴─────────┐
+         ▼                   ▼
+      Local RAG      Payment Providers
+                              │
+             ┌────────────────┼───────────────┐
+             ▼                ▼               ▼
+          Stripe          Conekta      Mercado Pago
 ```
 
-#### Workflow States:
-1. **`REQUEST_RECEIVED`**: Initial draft state when reservation request details are validated syntax-wise.
-2. **`VALIDATED`**: The customer identity is authenticated and parameters are validated.
-3. **`AVAILABILITY_CONFIRMED`**: Room calendars are checked and blocked to prevent double-booking.
-4. **`PRICE_CALCULATED`**: Final pricing (base price × nights) and tax estimates are calculated.
-5. **`PENDING_PAYMENT`**: A mock Stripe Checkout session is successfully registered and checkout link generated.
-6. **`PAID`**: Payment verification callback/webhook receives completion signal from Stripe Sandbox.
-7. **`RESERVATION_CONFIRMED`**: Room booking is finalized and locked into the customer schedule.
-8. **`CANCELLED`**: Booking aborted prior to payment or by client cancellation.
-9. **`REFUNDED`**: Payment successfully reverted, and reservation state updated to reflect the cancellation.
-10. **`FAILED`**: Encountered an unexpected system, validation, or transaction error.
+---
+
+# Technology Stack
+
+- Python 3.11
+- FastAPI
+- LangGraph
+- CrewAI
+- MCP-style Tools
+- Local RAG
+- Mock JSON Repository
+- Structured Logging
+- Stripe Sandbox
+- Conekta Sandbox
+- Mercado Pago Sandbox
+
+Architecture prepared for:
+
+- OpenAI
+- Claude
+- Gemini
+- Llama
+- HuggingFace
+- Ollama
+- Voyage AI
 
 ---
 
-### 💳 3. Payment Lifecycle
-- **`PENDING`**: Stripe session is initialized; waiting for customer to authorize charge.
-- **`COMPLETED`**: Stripe webhook signals successful capture. Moves reservation status to `PAID` then immediately `RESERVATION_CONFIRMED`.
-- **`REFUNDED`**: Administrator triggers standard charge refund, changing corresponding reservation status to `REFUNDED`.
+# Main Features
+
+- AI Reservation Workflow
+- Multi-step LangGraph orchestration
+- CrewAI collaborative agents
+- Local RAG policy retrieval
+- Provider-agnostic payment architecture
+- Multi-country payment configuration
+- Idempotent payment operations
+- Webhook-driven state transitions
+- Structured logging
+- Repository pattern
+- Service layer
+- MCP Tool abstraction
 
 ---
 
-### 🗄️ 4. Mock Data Strategy
-To support offline development, testing, and rapid phone-based previews, we use an in-memory-first JSON database under `mock_data/`:
-- **`rooms.json`**: Holds definitions for 10 realistic rooms.
-- **`customers.json`**: Holds 5 standard customer accounts (including a standard portfolio recipient email).
-- **`reservations.json`**: Tracks active reservation records and state progress.
-- **`payments.json`**: Stores payments corresponding to booking checkout instances.
-- **`availability.json`**: Date-by-date calendar blocks.
+# Current Workflow
 
-Every service query directly parses and persists updates to these files to guarantee real-time data consistency and high system fidelity without external database requirements.
-
----
-
----
-
-## 🛠️ Step-by-Step Installation
-
-### Prerequisites
-- **Python 3.11+**
-- **Docker** and **Docker-compose** (Optional)
-
-### Local Configuration
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/aquilinoFrancisco/hospitality-reservation-payment-agent.git
-   cd hospitality-reservation-payment-agent
-   ```
-2. Set up virtual environment and install dependencies:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-3. Set your credentials:
-   ```bash
-   cp .env.example .env
-   # Modify values in .env safely
-   ```
-4. Start development server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
+```text
+Reservation Request
+        │
+        ▼
+Validate Request
+        ▼
+Check Availability
+        ▼
+Calculate Price
+        ▼
+Retrieve Hotel Policies (RAG)
+        ▼
+Reservation Agent
+        ▼
+Payment Agent
+        ▼
+Generate Payment Link
+        ▼
+Customer Payment
+        ▼
+Webhook
+        ▼
+Reservation Confirmed
+```
 
 ---
 
-## 🔗 Live Architecture Documentation
-For deep-dives into each module's code structure and detailed system flowcharts:
-- [Architecture Blueprint](./docs/architecture.md)
-- [Stripe Sandbox Flow](./docs/payment-flow.md)
-- [Model Context Protocol Integration](./docs/mcp.md)
-- [Local RAG Design](./docs/rag.md)
-- [LangGraph Routing Diagrams](./docs/langgraph.md)
-- [System Design Interview Reference Sheets](./docs/interview-notes.md)
+# Project Structure
+
+```text
+app/
+graph/
+crew/
+agent_mcp/
+services/
+repositories/
+integrations/
+rag/
+knowledge_base/
+mock_data/
+docs/
+tests/
+```
+
+---
+
+# Documentation
+
+Detailed documentation is available under the `docs/` directory.
+
+- architecture.md
+- payment-flow.md
+- langgraph.md
+- rag.md
+- mcp.md
+- interview-notes.md
+
+---
+
+# Current Status
+
+Current implementation includes:
+
+- Mock reservation workflow
+- Local JSON repositories
+- LangGraph orchestration
+- CrewAI agents
+- MCP tools
+- Multi-provider payment abstraction
+- Stripe Sandbox integration
+- Conekta-ready architecture
+- Mercado Pago-ready architecture
+- Local RAG
+- Structured logging
+
+---
+
+# Future Roadmap
+
+Upcoming iterations will include:
+
+- LLM Provider Factory
+- Embedding Provider Factory
+- Vector Store Factory
+- Dynamic LangGraph routing
+- Notification Agent
+- Email integration
+- WhatsApp integration
+- SMS integration
+- CRM integration
+- Housekeeping integration
+- Invoice generation
+- Production payment gateways
+
+---
+
+# Design Principles
+
+- Separation of Concerns
+- Provider Agnostic Architecture
+- Event-Driven Design
+- Repository Pattern
+- Service Layer
+- Dependency Inversion
+- Human-in-the-Loop
+- Webhooks as Source of Truth
+- Full Auditability
+- Extensibility First
