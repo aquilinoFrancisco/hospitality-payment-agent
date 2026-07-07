@@ -7,9 +7,12 @@ This state is the shared memory of the reservation workflow.
 It carries:
 - reservation data
 - payment configuration
-- selected provider
+- LLM configuration
+- selected providers
 - currency
+- RAG / policy context
 - workflow messages
+- execution trace
 - errors
 
 LangGraph nodes should update this state, not access repositories directly.
@@ -17,7 +20,7 @@ LangGraph nodes should update this state, not access repositories directly.
 
 from __future__ import annotations
 
-from typing import List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 
 class ReservationState(TypedDict):
@@ -48,12 +51,26 @@ class ReservationState(TypedDict):
     payment_session_id: Optional[str]
     idempotency_key: Optional[str]
 
+    # LLM configuration
+    llm_provider: Optional[str]
+    llm_model: Optional[str]
+    llm_response: Optional[Dict[str, Any]]
+
+    # Prompt context
+    system_prompt: Optional[str]
+    user_prompt: Optional[str]
+
     # Pricing
     total_price: Optional[float]
 
     # RAG / policy context
     policy_context: Optional[List[dict]]
+    rag_context: Optional[str]
+
+    # Agent routing
+    selected_agent: Optional[str]
 
     # Observability
     messages: List[str]
+    execution_trace: List[Dict[str, Any]]
     error: Optional[str]
