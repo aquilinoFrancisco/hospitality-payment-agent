@@ -1,160 +1,208 @@
 # rag/retriever.py
 """
-Policy retriever for the Hospitality Reservation Payment Agent.
+RAG Retriever.
 
-This module builds a small local RAG index from Markdown policy files.
+This module orchestrates the Local RAG retrieval flow using the new
+provider-agnostic architecture.
 
-Current MVP:
-    - Reads Markdown files from knowledge_base/
-    - Chunks policy documents
-    - Generates deterministic mock embeddings
-    - Stores vectors in memory
-    - Retrieves relevant policy passages
+Architecture:
 
-Future production:
-    - Replace vector store provider with PGVector, OpenSearch, FAISS or Pinecone
-    - Replace mock embeddings with OpenAI, Azure OpenAI, Gemini or local models
+Document / Query
+        ↓
+Chunking
+        ↓
+Embedding Router
+        ↓
+Vector Store Router
+        ↓
+Retrieved Context
+        ↓
+LLM Router / Agent Workflow
 
-The retriever depends only on the VectorStore interface.
+This file should not know specific embedding providers or vector databases.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from rag.chunking import split_markdown_into_chunks
+import structlog
+
+from rag.chunking import RecursiveChunker
 from rag.embeddings import get_text_embedding
-from rag.vector_store import VectorStore, get_vector_store
+from rag.vector_store import get_vector_store
+
+logger = structlog.get_logger()
 
 
-KNOWLEDGE_BASE_DIR = Path("knowledge_base")
-
-
-def build_policy_index(
-    knowledge_base_dir: Path = KNOWLEDGE_BASE_DIR,
-    provider: str = "memory",
-) -> VectorStore:
+class RAGRetriever:
     """
-    Build a policy vector index from Markdown files.
+    Provider-agnostic RAG retriever.
 
-    Args:
-        knowledge_base_dir:
-            Directory containing policy Markdown files.
-        provider:
-            Vector store provider. Current MVP uses "memory".
+    Responsibilities:
+    - Chunk documents.
+    - Generate embeddings.
+    - Store embedded chunks.
+    - Retrieve relevant context for a query.
 
-    Returns:
-        VectorStore instance populated with policy chunks.
+    It does not call OpenAI, Gemini, FAISS, PGVector, OpenSearch or Pinecone
+    directly. Those decisions are delegated to the EmbeddingRouter and
+    VectorStoreRouter through the RAG wrappers.
     """
 
-    vector_store = get_vector_store(provider)
+    def __init__(
+        self,
+        embedding_provider: Optional[str] = None,
+        embedding_model: Optional[str] = None,
+        vector_store_provider: Optional[str] = None,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+    ) -> None:
+        self.embedding_provider = embedding_provider
+        self.embedding_model = embedding_model
 
-    if not knowledge_base_dir.exists():
-        return vector_store
-
-    for policy_file in knowledge_base_dir.glob("*.md"):
-
-        content = policy_file.read_text(
-            encoding="utf-8"
+        self.vector_store = get_vector_store(
+            provider=vector_store_provider,
         )
 
-        chunks = split_markdown_into_chunks(content)
+        self.chunker = RecursiveChunker(
+            chunk_size=chunk_size,
+            overlap=chunk_overlap,
+        )
 
-        for index, chunk in enumerate(chunks):
+    def index_document(
+        self,
+        document_id: str,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Chunk, embed and index a document.
+        """
 
-            doc_id = f"{policy_file.stem}-{index}"
+        metadata = metadata or {}
 
-            embedding = get_text_embedding(chunk)
+        chunks = self.chunker.chunk(
+            text=text,
+            metadata={
+                **metadata,
+                "document_id": document_id,
+            },
+        )
 
-            vector_store.add_document(
-                doc_id=doc_id,
-                content=chunk,
-                embedding=embedding,
-                metadata={
-                    "source": policy_file.name,
-                    "policy_type": policy_file.stem,
-                    "chunk_index": index,
-                },
+        indexed_chunks = 0
+
+        for chunk in chunks:
+            embedding = get_text_embedding(
+                text=chunk.text,
+                provider=self.embedding_provider,
+                model=self.embedding_model,
             )
 
-    return vector_store
+            self.vector_store.add_document(
+                doc_id=chunk.chunk_id,
+                content=chunk.text,
+                embedding=embedding,
+                metadata=chunk.metadata,
+            )
 
+            indexed_chunks += 1
 
-def retrieve_relevant_policies(
-    query: str,
-    limit: int = 2,
-    provider: str = "memory",
-    filters: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Retrieve relevant hotel policy passages.
-
-    Args:
-        query:
-            User or agent query.
-        limit:
-            Maximum number of policy chunks to return.
-        provider:
-            Vector store provider.
-        filters:
-            Optional metadata filters.
-
-    Returns:
-        List of JSON-safe policy matches.
-    """
-
-    vector_store = build_policy_index(
-        provider=provider
-    )
-
-    query_embedding = get_text_embedding(query)
-
-    results = vector_store.search(
-        query_embedding=query_embedding,
-        top_k=limit,
-        filters=filters,
-    )
-
-    return [
-        {
-            "content": result["content"],
-            "source": result["metadata"].get("source"),
-            "policy_type": result["metadata"].get("policy_type"),
-            "score": result["score"],
-        }
-        for result in results
-    ]
-
-
-def retrieve_policy_context(
-    query: str,
-    limit: int = 2,
-    provider: str = "memory",
-) -> str:
-    """
-    Retrieve policy context as a formatted string for prompts.
-
-    This is useful for CrewAI or LangGraph nodes that need simple text context.
-    """
-
-    policies = retrieve_relevant_policies(
-        query=query,
-        limit=limit,
-        provider=provider,
-    )
-
-    if not policies:
-        return "No relevant policy context found."
-
-    context_blocks = []
-
-    for policy in policies:
-
-        context_blocks.append(
-            f"Source: {policy['source']}\n"
-            f"Policy Type: {policy['policy_type']}\n"
-            f"Content: {policy['content']}"
+        logger.info(
+            "rag_document_indexed",
+            document_id=document_id,
+            chunk_count=indexed_chunks,
         )
 
-    return "\n\n---\n\n".join(context_blocks)
+        return {
+            "status": "success",
+            "document_id": document_id,
+            "chunk_count": indexed_chunks,
+            "chunking_strategy": self.chunker.strategy_name,
+        }
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve relevant chunks for a user query.
+        """
+
+        query_embedding = get_text_embedding(
+            text=query,
+            provider=self.embedding_provider,
+            model=self.embedding_model,
+        )
+
+        results = self.vector_store.search(
+            query_embedding=query_embedding,
+            top_k=top_k,
+            filters=filters,
+        )
+
+        logger.info(
+            "rag_context_retrieved",
+            query_length=len(query),
+            top_k=top_k,
+            results=len(results),
+        )
+
+        return results
+
+    def retrieve_context(
+        self,
+        query: str,
+        top_k: int = 3,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Retrieve relevant chunks and return them as a single context string.
+        """
+
+        results = self.retrieve(
+            query=query,
+            top_k=top_k,
+            filters=filters,
+        )
+
+        return "\n\n".join(
+            result.get("content", "")
+            for result in results
+            if result.get("content")
+        )
+
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Return RAG retriever health metadata.
+        """
+
+        return {
+            "retriever": "rag_retriever",
+            "chunking_strategy": self.chunker.strategy_name,
+            "vector_store": self.vector_store.health_check(),
+            "embedding_provider": self.embedding_provider or "default",
+            "embedding_model": self.embedding_model or "default",
+        }
+
+
+def create_retriever(
+    embedding_provider: Optional[str] = None,
+    embedding_model: Optional[str] = None,
+    vector_store_provider: Optional[str] = None,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+) -> RAGRetriever:
+    """
+    Factory helper for creating a RAGRetriever.
+    """
+
+    return RAGRetriever(
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        vector_store_provider=vector_store_provider,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
