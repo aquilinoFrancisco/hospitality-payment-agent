@@ -344,8 +344,7 @@ class Settings(BaseModel):
         """
         return self.DEFAULT_EMBEDDING_DIMENSIONS
 
-    def 
-is_supported_vector_store(
+    def is_supported_vector_store(
         self,
         provider: str,
     ) -> bool:
