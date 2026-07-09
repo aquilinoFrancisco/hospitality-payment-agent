@@ -428,3 +428,26 @@ Local RAG
 
 ADR-008
 Human-in-the-Loop
+
+---
+
+# Project Lead
+
+## Aquilino Francisco
+
+**Staff AI Engineer • AI Solutions Architect**
+
+This project is a personal reference implementation that explores enterprise-grade Agentic AI architectures, emphasizing provider-agnostic design, workflow orchestration, secure AI systems, and production-ready engineering patterns.
+
+**Core areas:**
+
+- Agentic AI Platforms
+- LangGraph & CrewAI
+- Model Context Protocol (MCP)
+- Provider-Agnostic Architecture
+- Retrieval-Augmented Generation (RAG)
+- AI Security
+- Human-in-the-Loop
+- Enterprise Software Architecture
+
+📧 aquilino.francisco@gmail.com
