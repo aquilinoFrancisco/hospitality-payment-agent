@@ -27,7 +27,15 @@ import {
   Check,
   RefreshCw,
   HelpCircle,
-  AlertCircle
+  AlertCircle,
+  MessageSquare,
+  Sliders,
+  User,
+  Bot,
+  Send,
+  Layers,
+  Server,
+  Fingerprint
 } from 'lucide-react';
 import { REPO_FILES, REPO_TREE, MOCK_RAG_DATABASE, FolderNode, RepoFile } from './data';
 import { motion, AnimatePresence } from 'motion/react';
@@ -50,14 +58,14 @@ function highlightCode(code: string, language: string) {
   if (language === 'markdown') {
     return code
       .replace(/^(#+ .*)$/gm, '<span class="text-emerald-400 font-bold">$1</span>')
-      .replace(/(\*\*.*?\*\*)/g, '<span class="text-sky-300 font-semibold">$1</span>')
+      .replace(/(\**.*?\**)/g, '<span class="text-sky-300 font-semibold">$1</span>')
       .replace(/(\`.*?\`)/g, '<span class="text-slate-300 font-mono bg-slate-800/60 px-1 rounded">$1</span>');
   }
   return code;
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'explorer' | 'simulator' | 'rag' | 'docs'>('explorer');
+  const [activeTab, setActiveTab] = useState<'explorer' | 'simulator' | 'rag' | 'docs' | 'providers'>('simulator');
   const [selectedFile, setSelectedFile] = useState<RepoFile | null>(REPO_FILES['README.md']);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     'hospitality-reservation-payment-agent': true,
@@ -86,6 +94,318 @@ export default function App() {
     cvc: '123',
     cardholder: 'AQUILINO FRANCISCO'
   });
+
+  // MVP Demo states
+  const [demoStep, setDemoStep] = useState<number>(0); // 0 means idle/welcome, 1 to 8 are the active steps
+  const [guestCountry, setGuestCountry] = useState<'US' | 'MX' | 'BR'>('US');
+  const [currency, setCurrency] = useState<'USD' | 'MXN' | 'BRL'>('USD');
+  const [isAutoPlaying, setIsAutoPlaying] = useState<boolean>(false);
+
+  // Provider-agnostic enterprise architecture states
+  const [llmProvider, setLlmProvider] = useState<string>('Gemini');
+  const [llmModel, setLlmModel] = useState<string>('gemini-2.5-flash');
+  const [embeddingProvider, setEmbeddingProvider] = useState<string>('Gemini');
+  const [vectorStore, setVectorStore] = useState<string>('Memory');
+  const [paymentProvider, setPaymentProvider] = useState<string>('Stripe');
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat on message update
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [demoStep]);
+
+  const handleLlmProviderChange = (provider: string) => {
+    setLlmProvider(provider);
+    if (provider === 'Gemini') setLlmModel('gemini-2.5-flash');
+    else if (provider === 'OpenAI') setLlmModel('gpt-4o');
+    else if (provider === 'Claude') setLlmModel('claude-3-5-sonnet');
+    else if (provider === 'Llama') setLlmModel('llama-3.3-70b');
+    else if (provider === 'Ollama') setLlmModel('deepseek-r1:8b');
+    else if (provider === 'HuggingFace') setLlmModel('mistral-7b-instruct');
+  };
+
+  const handlePaymentProviderChange = (provider: string) => {
+    setPaymentProvider(provider);
+    if (provider === 'Stripe' || provider === 'PayPal' || provider === 'Adyen' || provider === 'Checkout.com' || provider === 'Klarna') {
+      setGuestCountry('US');
+      setCurrency('USD');
+    } else if (provider === 'Conekta') {
+      setGuestCountry('MX');
+      setCurrency('MXN');
+    } else if (provider === 'Mercado Pago') {
+      setGuestCountry('BR');
+      setCurrency('BRL');
+    }
+  };
+
+  const handleGuestCountryChange = (country: 'US' | 'MX' | 'BR') => {
+    setGuestCountry(country);
+    if (country === 'US') {
+      setCurrency('USD');
+      setPaymentProvider('Stripe');
+    } else if (country === 'MX') {
+      setCurrency('MXN');
+      setPaymentProvider('Conekta');
+    } else if (country === 'BR') {
+      setCurrency('BRL');
+      setPaymentProvider('Mercado Pago');
+    }
+  };
+
+  // Dynamic routing parameters, pricing, and steps based on country/currency inputs
+  const getStepData = (stepNum: number, country: 'US' | 'MX' | 'BR', curr: 'USD' | 'MXN' | 'BRL') => {
+    const rateMap = {
+      USD: { symbol: '$', base: 250, label: 'USD' },
+      MXN: { symbol: '$', base: 4500, label: 'MXN' },
+      BRL: { symbol: 'R$', base: 1200, label: 'BRL' }
+    };
+    const rate = rateMap[curr] || rateMap.USD;
+    const basePrice = rate.base;
+    const totalPrice = rate.base * 2;
+    const totalFormatted = `${rate.symbol}${totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${rate.label}`;
+    const baseFormatted = `${rate.symbol}${basePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${rate.label}`;
+    const activeProviderName = paymentProvider || (country === 'US' ? 'Stripe' : country === 'MX' ? 'Conekta' : 'Mercado Pago');
+    
+    const colorsMap: Record<string, string> = {
+      'Stripe': '#635bff',
+      'PayPal': '#003087',
+      'Adyen': '#0abf53',
+      'Checkout.com': '#111111',
+      'Klarna': '#ffb3c7',
+      'Conekta': '#1b255a',
+      'Mercado Pago': '#009ee3'
+    };
+    const activeColor = colorsMap[activeProviderName] || '#635bff';
+    
+    const webhooksMap: Record<string, string> = {
+      'Stripe': 'checkout.session.completed',
+      'PayPal': 'checkout.order.approved',
+      'Adyen': 'payment.authorised',
+      'Checkout.com': 'payment_approved',
+      'Klarna': 'order_completed',
+      'Conekta': 'order.paid',
+      'Mercado Pago': 'payment.created'
+    };
+    const activeWebhook = webhooksMap[activeProviderName] || 'checkout.session.completed';
+
+    const providerMap = {
+      US: { 
+        name: `${activeProviderName} Sandbox`, 
+        color: activeColor, 
+        textColor: `text-[${activeColor}]`, 
+        bg: `bg-[${activeColor}]`, 
+        webhook: activeWebhook, 
+        eventId: `evt_${activeProviderName.toLowerCase().replace(/[^a-z0-9]/g, '')}_test_88cf9b` 
+      },
+      MX: { 
+        name: 'Conekta Sandbox', 
+        color: '#1b255a', 
+        textColor: 'text-[#1b255a]', 
+        bg: 'bg-[#1b255a]', 
+        webhook: 'order.paid', 
+        eventId: 'evt_conekta_test_88cf9b' 
+      },
+      BR: { 
+        name: 'Mercado Pago Sandbox', 
+        color: '#009ee3', 
+        textColor: 'text-[#009ee3]', 
+        bg: 'bg-[#009ee3]', 
+        webhook: 'payment.created', 
+        eventId: 'evt_mp_test_88cf9b' 
+      }
+    };
+    const provider = providerMap[country] || providerMap.US;
+
+    const checkoutUrl = country === 'US' 
+      ? `https://checkout.stripe.com/pay/cs_test_${idempotencyKey.substring(13)}`
+      : country === 'MX'
+      ? `https://checkout.conekta.com/pay/order_test_${idempotencyKey.substring(13)}`
+      : `https://checkout.mercadopago.com/pay/pref_test_${idempotencyKey.substring(13)}`;
+
+    const steps = [
+      {
+        id: 1,
+        name: "Guest Request",
+        title: "1. Guest Request Received",
+        langGraphNode: "validate_request",
+        crewAiAgent: "ReservationAgent",
+        agentStatus: "Parsing request parameters",
+        mcpTool: "None",
+        ragDoc: "hotel_terms.md",
+        lifecycleStatus: "DRAFT" as const,
+        log: `[LangGraph:validate_request] Validating parameters. Customer: aquilino.francisco@gmail.com, Room: deluxe-suite, Dates: 2026-07-10 to 2026-07-12 (2 nights).`,
+        agentSpeech: `Welcome! Let me check that request for a Deluxe Suite from July 10th to 12th for you.`,
+        guestSpeech: `Hi, I'd like to book a Deluxe Suite for 2 nights starting tomorrow, July 10th. Can you help me?`,
+      },
+      {
+        id: 2,
+        name: "Availability",
+        title: "2. Availability Checked",
+        langGraphNode: "check_availability",
+        crewAiAgent: "ReservationAgent",
+        agentStatus: "Querying room inventory",
+        mcpTool: "check_availability",
+        ragDoc: "hotel_terms.md",
+        lifecycleStatus: "DRAFT" as const,
+        log: `[MCP Tool:check_availability] Calling tool with {"room_id": "deluxe-suite", "dates": ["2026-07-10", "2026-07-11"]}. Result: Deluxe Suite is AVAILABLE.`,
+        agentSpeech: "Good news! The Deluxe Suite is available for your requested dates. I'm checking the rates next.",
+        guestSpeech: "Perfect! Is it available?",
+      },
+      {
+        id: 3,
+        name: "Pricing",
+        title: "3. Price Calculated",
+        langGraphNode: "calculate_price",
+        crewAiAgent: "ReservationAgent",
+        agentStatus: "Pricing booking details",
+        mcpTool: "calculate_price",
+        ragDoc: "hotel_terms.md",
+        lifecycleStatus: "DRAFT" as const,
+        log: `[MCP Tool:calculate_price] Calling tool with {"room_id": "deluxe-suite", "nights": 2}. Result: base_price=${basePrice.toFixed(2)}, total_price=${totalPrice.toFixed(2)}, currency=${curr.toLowerCase()}.`,
+        agentSpeech: `The base rate is ${baseFormatted} per night. For 2 nights, the total comes out to ${totalFormatted}.`,
+        guestSpeech: "Excellent. How much is the total price?",
+      },
+      {
+        id: 4,
+        name: "RAG Retrieval",
+        title: "4. Policy Retrieved from RAG",
+        langGraphNode: "retrieve_policy",
+        crewAiAgent: "ReservationAgent",
+        agentStatus: "Confirming policy compliance",
+        mcpTool: "None (Vector Store Search)",
+        ragDoc: "cancellation_policy.md",
+        lifecycleStatus: "DRAFT" as const,
+        log: `[RAG Retrieval] Matching embedding vectors against local policy store. Retrieved cancellation_policy.md and payment_policy.md. Semantic similarity score: 0.942.`,
+        agentSpeech: `I've retrieved our policies. You can cancel free of charge up to 48 hours prior. Also, our payment policy mandates a secure external checkout session.`,
+        guestSpeech: "What are your cancellation policies?",
+      },
+      {
+        id: 5,
+        name: "Generate Link",
+        title: "5. Payment Link Generated",
+        langGraphNode: "generate_payment_link",
+        crewAiAgent: "PaymentAgent",
+        agentStatus: "Creating Checkout Session",
+        mcpTool: "create_payment_link",
+        ragDoc: "payment_policy.md",
+        lifecycleStatus: "PENDING_PAYMENT" as const,
+        log: `[MCP Tool:create_payment_link] Calling tool with {"amount": ${totalPrice.toFixed(2)}, "currency": "${curr.toLowerCase()}", "idempotency_key": "${idempotencyKey}"}. Gateway router selected: ${provider.name}.`,
+        agentSpeech: `I've generated a secure checkout payment link for ${totalFormatted} using our ${provider.name} router. Please click the checkout button to complete payment.`,
+        guestSpeech: "Great, please send me the payment link.",
+      },
+      {
+        id: 6,
+        name: "Pending Payment",
+        title: "6. Pending Payment",
+        langGraphNode: "awaiting_payment",
+        crewAiAgent: "PaymentAgent",
+        agentStatus: "Awaiting webhook payment confirmation",
+        mcpTool: "check_payment_status",
+        ragDoc: "payment_policy.md",
+        lifecycleStatus: "PENDING_PAYMENT" as const,
+        log: `[LangGraph:awaiting_payment] Polling payment session state. Webhook listener active for ${provider.webhook}.`,
+        agentSpeech: `I'm monitoring the ${provider.name} webhook stream for your payment confirmation...`,
+        guestSpeech: `[Opening payment checkout link and completing payment...]`,
+      },
+      {
+        id: 7,
+        name: "Payment Confirmed",
+        title: "7. Payment Confirmed",
+        langGraphNode: "confirm_payment",
+        crewAiAgent: "PaymentAgent",
+        agentStatus: "Verifying webhook signature",
+        mcpTool: "confirm_reservation",
+        ragDoc: "refund_policy.md",
+        lifecycleStatus: "PAID" as const,
+        log: `[Webhooks Controller] POST /webhooks/${country.toLowerCase()} received. Signature verified. Event: ${provider.webhook}, Event ID: ${provider.eventId}. State transitioning to PAID.`,
+        agentSpeech: "Payment confirmed! Webhook signature is fully verified. We are now locking in your reservation.",
+        guestSpeech: "I've completed the payment! Can you check if you received it?",
+      },
+      {
+        id: 8,
+        name: "Confirmed",
+        title: "8. Reservation Confirmed",
+        langGraphNode: "finalize_reservation",
+        crewAiAgent: "ReservationAgent",
+        agentStatus: "Saving reservation audit report",
+        mcpTool: "save_reservation_report",
+        ragDoc: "hotel_terms.md",
+        lifecycleStatus: "CONFIRMED" as const,
+        log: `[MCP Tool:save_reservation_report] Saving reservation audit report JSON to disk. Path: /reports/report_res_001.json. Graph state set to COMPLETED.`,
+        agentSpeech: `Your Deluxe Suite is fully booked! I've saved your reservation audit report. Have a wonderful stay starting tomorrow!`,
+        guestSpeech: "Awesome! Thank you so much for the quick booking!",
+      }
+    ];
+
+    return {
+      steps,
+      rate,
+      provider,
+      checkoutUrl,
+      totalFormatted,
+      baseFormatted,
+      totalPrice,
+      basePrice
+    };
+  };
+
+  // Helper to extract logs up to current active step
+  const getLogsUpToStep = (stepIndex: number, country: 'US' | 'MX' | 'BR', curr: 'USD' | 'MXN' | 'BRL') => {
+    const data = getStepData(stepIndex, country, curr);
+    const logs: string[] = [];
+    for (let i = 0; i < stepIndex; i++) {
+      logs.push(data.steps[i].log);
+    }
+    return logs;
+  };
+
+  // Helper to extract messages up to current active step
+  const getChatMessages = (stepIndex: number, country: 'US' | 'MX' | 'BR', curr: 'USD' | 'MXN' | 'BRL') => {
+    const data = getStepData(stepIndex, country, curr);
+    const messages: { sender: 'guest' | 'agent'; text: string; id: number; timestamp: string; llm?: string; ragDoc?: string; mcpTool?: string }[] = [];
+    for (let i = 0; i < stepIndex; i++) {
+      const step = data.steps[i];
+      const minuteOffset = i * 2;
+      const formattedTime = `12:${minuteOffset < 10 ? '0' + minuteOffset : minuteOffset} PM`;
+      
+      if (step.guestSpeech) {
+        messages.push({ 
+          sender: 'guest', 
+          text: step.guestSpeech, 
+          id: i * 2, 
+          timestamp: formattedTime 
+        });
+      }
+      if (step.agentSpeech) {
+        messages.push({ 
+          sender: 'agent', 
+          text: step.agentSpeech, 
+          id: i * 2 + 1, 
+          timestamp: formattedTime,
+          llm: llmProvider,
+          ragDoc: step.ragDoc !== 'None' ? step.ragDoc : undefined,
+          mcpTool: step.mcpTool !== 'None' && step.mcpTool !== 'None (Vector Store Search)' ? step.mcpTool : undefined
+        });
+      }
+    }
+    return messages;
+  };
+
+  // Autoplay hook
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isAutoPlaying && demoStep > 0 && demoStep < 8 && demoStep !== 6) {
+      interval = setInterval(() => {
+        setDemoStep(prev => prev + 1);
+      }, 2000);
+    } else if (demoStep === 6 || demoStep === 8) {
+      setIsAutoPlaying(false);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isAutoPlaying, demoStep]);
 
   // RAG query states
   const [ragQuery, setRagQuery] = useState('');
@@ -290,7 +610,7 @@ export default function App() {
             </h1>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Agentic booking and safe Stripe Sandbox workflows with LangGraph, CrewAI, and Model Context Protocol.
+            Provider-agnostic agentic booking workflows with LangGraph, CrewAI, and Model Context Protocol.
           </p>
         </div>
 
@@ -298,13 +618,13 @@ export default function App() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs bg-emerald-950/60 border border-emerald-900/50 text-emerald-400 px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            Phase 1: Structure Ready
+            Provider-Agnostic
           </span>
           <span className="text-xs bg-slate-800/60 border border-slate-700/50 text-slate-300 px-2.5 py-1 rounded-full font-medium flex items-center gap-1">
-            Stripe Sandbox
+            Multi-Provider
           </span>
           <span className="text-xs bg-slate-800/60 border border-slate-700/50 text-slate-300 px-2.5 py-1 rounded-full font-medium flex items-center gap-1">
-            Local RAG
+            Enterprise Architecture
           </span>
           <a 
             href="https://github.com/aquilinoFrancisco/hospitality-reservation-payment-agent" 
@@ -343,6 +663,18 @@ export default function App() {
           <Cpu size={14} />
           Agent Payment Simulator
           <span className="text-[9px] px-1 py-0.2 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400">Live</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('providers')}
+          className={`py-3 px-4 text-xs font-semibold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'providers' 
+              ? 'border-emerald-500 text-emerald-400 bg-emerald-950/10' 
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sliders size={14} />
+          AI Providers
+          <span className="text-[9px] px-1 py-0.2 bg-sky-500/10 border border-sky-500/20 rounded text-sky-400">Config</span>
         </button>
         <button 
           onClick={() => setActiveTab('rag')}
@@ -449,7 +781,7 @@ export default function App() {
                   {/* CODE PANEL */}
                   <div className="flex-1 overflow-auto bg-[#05080e] p-6 font-mono text-xs leading-relaxed text-slate-300">
                     <pre className="relative select-text">
-                      <code 
+                       <code 
                         dangerouslySetInnerHTML={{ 
                           __html: highlightCode(selectedFile.content, selectedFile.language) 
                         }} 
@@ -468,291 +800,678 @@ export default function App() {
         )}
 
         {/* VIEW 2: STREAM AGENT SIMULATOR */}
-        {activeTab === 'simulator' && (
-          <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto p-6 gap-6">
-            
-            {/* WORKFLOW CONTROLLERS */}
-            <div className="flex-1 flex flex-col gap-6">
+        {activeTab === 'simulator' && (() => {
+          const currentData = getStepData(demoStep, guestCountry, currency);
+          const currentStep = demoStep > 0 ? currentData.steps[demoStep - 1] : null;
+          const isAtPaymentStep = demoStep === 6;
+          const isDemoFinished = demoStep === 8;
+
+          return (
+            <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto p-6 gap-6">
               
-              {/* CONFIG & INITIATE BLOCK */}
-              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Terminal size={16} className="text-emerald-400" />
-                    <h2 className="text-sm font-bold text-slate-200">Simulation Config</h2>
-                  </div>
-                  <span className="text-[10px] font-mono bg-emerald-950/40 text-emerald-400 border border-emerald-900/50 px-2 py-0.5 rounded">
-                    Stripe Sandbox Ready
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
-                      Customer Email
-                    </label>
-                    <input 
-                      type="text" 
-                      disabled
-                      value="aquilino.francisco@gmail.com" 
-                      className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-300 cursor-not-allowed"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
-                      Idempotency Key (Safe Operations)
-                    </label>
-                    <input 
-                      type="text" 
-                      disabled
-                      value={idempotencyKey} 
-                      className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-mono text-emerald-400 cursor-not-allowed"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
-                      Room Type
-                    </label>
-                    <select disabled className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-sans text-slate-300 cursor-not-allowed">
-                      <option>Deluxe Suite ($250.00 / night)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
-                      Stay Period
-                    </label>
-                    <input 
-                      type="text" 
-                      disabled
-                      value="2026-07-10 to 2026-07-12 (2 Nights)" 
-                      className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-sans text-slate-300 cursor-not-allowed"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  {simState === 'idle' && (
-                    <button
-                      onClick={runReservationSimulation}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2.5 px-4 rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/20"
-                    >
-                      <Play size={14} />
-                      Start Agentic Booking Stream
-                    </button>
-                  )}
-                  {simState !== 'idle' && (
-                    <button
-                      onClick={resetSimulation}
-                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs py-2.5 px-4 rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <RefreshCw size={14} className={simState === 'running' ? 'animate-spin' : ''} />
-                      Reset Simulator State
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* SIMULATION STEPPER METRICS */}
-              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                    Agent Stream Event Log
-                  </h3>
-                  {simProgress > 0 && (
-                    <span className="text-xs font-mono text-slate-400">{simProgress}% Complete</span>
-                  )}
-                </div>
-
-                {/* Simulated Progress bar */}
-                <div className="w-full bg-slate-900 rounded-full h-1.5 mb-5 overflow-hidden">
-                  <motion.div 
-                    className="bg-emerald-500 h-1.5 rounded-full" 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${simProgress}%` }}
-                    transition={{ duration: 0.4 }}
-                  />
-                </div>
-
-                {/* Log messages */}
-                <div className="space-y-3 font-mono text-xs max-h-[250px] overflow-y-auto pr-1">
-                  {simLogs.length === 0 ? (
-                    <div className="text-slate-500 text-center py-6 text-xs">
-                      No stream active. Click the button above to simulate the LangGraph node executions.
-                    </div>
-                  ) : (
-                    simLogs.map((log, index) => (
-                      <div key={index} className="border-l-2 border-emerald-500/40 pl-3 py-1">
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 mb-0.5">
-                          <span className="font-semibold uppercase text-sky-400">Step: {log.step}</span>
-                          <span>{log.timestamp}</span>
-                        </div>
-                        <p className="text-slate-300 leading-normal">{log.message}</p>
-                      </div>
-                    ))
-                  )}
-
-                  {simState === 'running' && (
-                    <div className="flex items-center gap-2 text-xs text-slate-400 italic py-2 pl-3 animate-pulse">
-                      <RefreshCw size={12} className="animate-spin text-emerald-500" />
-                      LangGraph node processing...
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* STRIPE SANDBOX INTERACTIVE BLOCK */}
-            <div className="w-full xl:w-96 flex flex-col gap-6">
-              
-              {/* STATUS INDICATOR CARD */}
-              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 text-center flex flex-col items-center justify-center">
-                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-2">
-                  Workflow Reservation State
-                </span>
+              {/* LEFT DASHBOARD COLUMN */}
+              <div className="flex-1 flex flex-col gap-6">
                 
-                <AnimatePresence mode="wait">
-                  {simState === 'idle' && (
-                    <motion.div 
-                      key="state-idle"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="text-slate-500 font-bold font-mono text-lg py-2"
-                    >
-                      IDLE
-                    </motion.div>
-                  )}
-                  {simState === 'running' && (
-                    <motion.div 
-                      key="state-running"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-sky-400 font-bold font-mono text-lg py-2 flex items-center gap-2"
-                    >
-                      <RefreshCw size={18} className="animate-spin" />
-                      PROCESSING
-                    </motion.div>
-                  )}
-                  {simState === 'pending_payment' && (
-                    <motion.div 
-                      key="state-pending"
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="text-amber-400 font-bold font-mono text-base py-2 flex flex-col items-center gap-1.5"
-                    >
-                      <span className="px-2.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-xs animate-pulse">
-                        PENDING_PAYMENT
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-sans font-normal mt-1">
-                        Awaiting Stripe Payment Link Authorization
-                      </span>
-                    </motion.div>
-                  )}
-                  {simState === 'processing_payment' && (
-                    <motion.div 
-                      key="state-processing"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-amber-500 font-bold font-mono text-sm py-2 flex items-center gap-2"
-                    >
-                      <RefreshCw size={14} className="animate-spin" />
-                      SUBMITTING CHECKOUT...
-                    </motion.div>
-                  )}
-                  {(simState === 'paid' || simState === 'confirmed') && (
-                    <motion.div 
-                      key="state-confirmed"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="text-emerald-400 font-bold font-mono text-base py-1 flex flex-col items-center gap-1.5"
-                    >
-                      <span className="px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs flex items-center gap-1">
-                        <CheckCircle2 size={12} /> CONFIRMED & PAID
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-sans font-normal">
-                        Webhook response received. Reservation completed.
-                      </span>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-
-              {/* STRIPE SANDBOX SIMULATOR */}
-              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl shadow-black/40">
-                <div className="bg-[#635bff] px-5 py-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-white">
-                    <CreditCard size={16} />
-                    <span className="font-sans font-bold text-xs uppercase tracking-wider">Stripe Sandbox Checkout</span>
+                {/* CONFIG & INITIATE BLOCK */}
+                <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Terminal size={16} className="text-emerald-400" />
+                      <h2 className="text-sm font-bold text-slate-200">Simulation Configuration</h2>
+                    </div>
+                    <span className="text-[10px] font-mono bg-emerald-950/40 text-emerald-400 border border-emerald-900/50 px-2 py-0.5 rounded">
+                      Gateway Router Live
+                    </span>
                   </div>
-                  <span className="text-[9px] bg-white/20 text-white font-mono px-2 py-0.5 rounded">
-                    Test Mode
-                  </span>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
+                        Guest Country Profile
+                      </label>
+                      <select 
+                        disabled={demoStep > 0}
+                        value={guestCountry}
+                        onChange={(e) => {
+                          const val = e.target.value as 'US' | 'MX' | 'BR';
+                          setGuestCountry(val);
+                          if (val === 'US') setCurrency('USD');
+                          else if (val === 'MX') setCurrency('MXN');
+                          else if (val === 'BR') setCurrency('BRL');
+                        }}
+                        className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-sans text-slate-300 focus:border-emerald-500 outline-none cursor-pointer"
+                      >
+                        <option value="US">United States (Stripe)</option>
+                        <option value="MX">Mexico (Conekta)</option>
+                        <option value="BR">Brazil (Mercado Pago)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
+                        Active Currency
+                      </label>
+                      <select 
+                        disabled={demoStep > 0}
+                        value={currency}
+                        onChange={(e) => setCurrency(e.target.value as 'USD' | 'MXN' | 'BRL')}
+                        className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-sans text-slate-300 focus:border-emerald-500 outline-none cursor-pointer"
+                      >
+                        <option value="USD">USD ($)</option>
+                        <option value="MXN">MXN ($)</option>
+                        <option value="BRL">BRL (R$)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">
+                        Room Selection
+                      </label>
+                      <select disabled className="w-full bg-[#05080e] border border-slate-800 rounded-lg p-2 text-xs font-sans text-slate-300 cursor-not-allowed">
+                        <option>Deluxe Suite ({currentData.baseFormatted} / night)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* CONTROLS ROW */}
+                  <div className="flex flex-wrap items-center justify-between border-t border-slate-800/60 pt-4 gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-slate-400">Idempotency Key:</span>
+                      <span className="font-mono text-xs text-emerald-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-900">{idempotencyKey}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      {demoStep === 0 ? (
+                        <button
+                          onClick={() => setDemoStep(1)}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 px-4 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-950/20"
+                        >
+                          <Play size={13} />
+                          Start MVP Demo
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            disabled={isAtPaymentStep || isDemoFinished}
+                            onClick={() => setDemoStep(prev => prev + 1)}
+                            className={`font-semibold text-xs py-2 px-4 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${
+                              isAtPaymentStep || isDemoFinished
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            }`}
+                          >
+                            <ChevronRight size={13} />
+                            {isAtPaymentStep ? "Awaiting Payment" : isDemoFinished ? "Booking Confirmed" : "Next Step"}
+                          </button>
+
+                          <button
+                            onClick={() => setIsAutoPlaying(!isAutoPlaying)}
+                            disabled={isAtPaymentStep || isDemoFinished}
+                            className={`font-semibold text-xs py-2 px-4 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${
+                              isAtPaymentStep || isDemoFinished
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : isAutoPlaying
+                                ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse'
+                                : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                            }`}
+                          >
+                            {isAutoPlaying ? "Pause Auto Run" : "Auto Run Demo"}
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          setDemoStep(0);
+                          setIsAutoPlaying(false);
+                          setIdempotencyKey('idem_sandbox_' + Math.random().toString(36).substring(2, 14));
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs py-2 px-4 rounded-lg cursor-pointer transition-all flex items-center gap-1.5"
+                      >
+                        <RefreshCw size={13} />
+                        Reset
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="p-5">
-                  <div className="mb-4 border-b border-slate-800/60 pb-4">
-                    <div className="flex justify-between items-center text-xs mb-1.5">
-                      <span className="text-slate-400">Reservation Reference</span>
-                      <span className="font-mono text-slate-200 font-semibold">res_99f2b8a0</span>
+                {/* GRAPH WORKFLOW CARD */}
+                <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-md">
+                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <Cpu size={14} className="text-emerald-400" />
+                    LangGraph Workflow Orchestration (8 Nodes)
+                  </h3>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {getStepData(8, guestCountry, currency).steps.map((step, idx) => {
+                      const isCompleted = demoStep > idx + 1;
+                      const isActive = demoStep === idx + 1;
+                      const isFuture = demoStep < idx + 1;
+
+                      return (
+                        <div 
+                          key={step.id} 
+                          className={`p-3 rounded-lg border transition-all flex flex-col justify-between min-h-[75px] relative overflow-hidden ${
+                            isActive 
+                              ? 'border-emerald-500 bg-emerald-950/20 shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-500/30' 
+                              : isCompleted 
+                              ? 'border-emerald-900/60 bg-[#05080e]/60 opacity-80' 
+                              : 'border-slate-800/80 bg-[#05080e]/20 opacity-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[10px] font-mono uppercase tracking-wider font-semibold ${
+                              isActive ? 'text-emerald-400' : isCompleted ? 'text-emerald-500/80' : 'text-slate-500'
+                            }`}>
+                              Node {idx + 1}
+                            </span>
+                            {isCompleted && <CheckCircle2 size={12} className="text-emerald-400" />}
+                            {isActive && (
+                              <span className="flex h-2 w-2 relative">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div className="mt-1.5">
+                            <div className="font-sans font-bold text-xs text-slate-200 truncate">{step.name}</div>
+                            <div className="font-mono text-[9px] text-slate-500 mt-0.5 truncate">{step.langGraphNode}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* VISUAL DIALOG STREAM CONTAINER */}
+                <div className="flex-1 min-h-[400px] border border-slate-800/80 bg-[#080d16] rounded-xl flex flex-col overflow-hidden shadow-md">
+                  
+                  {/* CONVERSATION BAR */}
+                  <div className="px-4 py-3 bg-slate-950/40 border-b border-slate-900/60 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare size={14} className="text-emerald-400" />
+                      <span className="text-xs font-bold text-slate-300">Live Agent Webhook & Orchestration Stream</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs mb-1.5">
-                      <span className="text-slate-400">Item</span>
-                      <span className="text-slate-200">Deluxe Suite • 2 Nights</span>
-                    </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-400 font-medium">Total Amount Due</span>
-                      <span className="text-emerald-400 font-bold">$500.00 USD</span>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-mono">Status:</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-semibold ${
+                        demoStep === 0 
+                          ? 'bg-slate-900 text-slate-400' 
+                          : isDemoFinished 
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-900/40' 
+                          : 'bg-amber-950/40 text-amber-400 border border-amber-900/40 animate-pulse'
+                      }`}>
+                        {demoStep === 0 ? 'IDLE' : isDemoFinished ? 'COMPLETED' : 'EXECUTING'}
+                      </span>
                     </div>
                   </div>
 
-                  {simState === 'pending_payment' ? (
-                    <div className="space-y-4">
-                      <p className="text-[11px] text-slate-400 leading-normal">
-                        The PaymentAgent created an active secure Checkout Session checkout url with Stripe Sandbox. Click below to authorize transaction.
-                      </p>
-
-                      <div className="space-y-2">
-                        <div className="bg-slate-950 p-2.5 rounded border border-slate-800 font-mono text-[10px] text-slate-400 leading-normal">
-                          <div className="text-[9px] uppercase font-bold text-slate-500 mb-1">Idempotency-Key Header:</div>
-                          <span className="text-emerald-400 break-all">{idempotencyKey}</span>
-                        </div>
-
-                        <button
-                          onClick={submitStripePayment}
-                          className="w-full bg-[#635bff] hover:bg-[#7a73ff] text-white font-bold text-xs py-2.5 px-4 rounded-lg cursor-pointer transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#635bff]/20"
-                        >
-                          <Lock size={12} />
-                          Simulate Stripe Payment ($500)
-                        </button>
+                  {/* ACTIVE NODES SUMMARY BAR */}
+                  {demoStep > 0 && currentStep && (
+                    <div className="bg-[#0c1322] border-b border-slate-800/40 px-5 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3.5 text-xs text-slate-300">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">CrewAI Agent</span>
+                        <span className="font-semibold text-slate-200 flex items-center gap-1.5 mt-0.5">
+                          <Bot size={13} className="text-emerald-400" />
+                          {currentStep.crewAiAgent}
+                        </span>
                       </div>
-                    </div>
-                  ) : simState === 'processing_payment' ? (
-                    <div className="py-8 text-center flex flex-col items-center justify-center">
-                      <RefreshCw className="animate-spin text-[#635bff] mb-3" size={24} />
-                      <p className="text-xs text-slate-400">Submitting authorized charge to Stripe API sandbox...</p>
-                    </div>
-                  ) : simState === 'confirmed' || simState === 'paid' ? (
-                    <div className="py-6 text-center flex flex-col items-center justify-center">
-                      <div className="w-10 h-10 rounded-full bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mb-3">
-                        <CheckCircle2 size={20} />
+                      <div className="flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Agent State</span>
+                        <span className="font-semibold text-slate-300 mt-0.5 truncate">{currentStep.agentStatus}</span>
                       </div>
-                      <h4 className="text-xs font-bold text-slate-200 mb-1">Sandbox Payment Complete!</h4>
-                      <p className="text-[10px] text-slate-400 leading-relaxed max-w-[200px] mx-auto">
-                        Webhook callback confirmed. The room has been securely reserved. Check reports/ folder!
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="py-8 text-center text-xs text-slate-500 leading-normal">
-                      <HelpCircle size={20} className="mx-auto mb-2 text-slate-700" />
-                      Stripe checkout session will display here once you run the Agent booking stream.
+                      <div className="flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">MCP Bound Tool</span>
+                        <span className="font-mono text-[11px] text-amber-300 font-medium mt-0.5 truncate">{currentStep.mcpTool}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Active Lifecycle Status</span>
+                        <span className="font-bold text-[10px] text-emerald-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-900/60 mt-0.5 text-center self-start font-mono">
+                          {currentStep.lifecycleStatus}
+                        </span>
+                      </div>
                     </div>
                   )}
+
+                  {/* STREAM BUBBLES SCROLL */}
+                  <div className="flex-1 p-5 overflow-y-auto space-y-4 max-h-[300px]">
+                    <AnimatePresence>
+                      {demoStep === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                          <Sparkles size={32} className="text-emerald-500/80 mb-2 animate-bounce" />
+                          <h4 className="text-xs font-bold text-slate-300 mb-1">Agent Orchestration Workspace Sandbox</h4>
+                          <p className="text-[11px] max-w-sm mx-auto leading-relaxed text-slate-400">
+                            Configure the guest country and currency parameters above, then click <strong>"Start MVP Demo"</strong> to visualize the step-by-step routing flow.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {getChatMessages(demoStep, guestCountry, currency).map((msg) => {
+                            const isAgent = msg.sender === 'agent';
+                            return (
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                key={msg.id}
+                                className={`flex gap-3 max-w-[85%] ${isAgent ? 'mr-auto' : 'ml-auto flex-row-reverse'}`}
+                              >
+                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center border flex-shrink-0 ${
+                                  isAgent 
+                                    ? 'bg-emerald-950/50 border-emerald-900/50 text-emerald-400' 
+                                    : 'bg-slate-850/60 border-slate-800 text-slate-300'
+                                }`}>
+                                  {isAgent ? <Bot size={14} /> : <User size={14} />}
+                                </div>
+                                
+                                <div className="space-y-1">
+                                  <div className={`p-3 rounded-xl text-xs leading-relaxed ${
+                                    isAgent 
+                                      ? 'bg-slate-900 border border-slate-850 text-slate-200 rounded-tl-none' 
+                                      : 'bg-emerald-900/20 border border-emerald-900/30 text-emerald-200 rounded-tr-none'
+                                  }`}>
+                                    {msg.text}
+
+                                    {/* MOCK SANDBOX PAYMENT EMBEDDED CARD ONLY IN STEP 6 */}
+                                    {msg.text.includes('[Opening payment checkout link') && (
+                                      <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3.5 text-slate-300 space-y-3 font-sans shadow-lg max-w-sm">
+                                        <div className="flex items-center justify-between border-b border-slate-900 pb-2">
+                                          <div className="flex items-center gap-2">
+                                            <CreditCard size={14} className="text-emerald-400" />
+                                            <span className="text-xs font-bold font-mono">{currentData.provider.name}</span>
+                                          </div>
+                                          <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold font-mono">Secure Link Checkout</span>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                          <div className="flex justify-between text-xs">
+                                            <span className="text-slate-500">Amount due:</span>
+                                            <span className="font-bold text-slate-200 font-mono">{currentData.totalFormatted}</span>
+                                          </div>
+                                          <div className="flex justify-between text-xs">
+                                            <span className="text-slate-500">Idempotency:</span>
+                                            <span className="font-mono text-slate-400 text-[10px] truncate max-w-[150px]">{idempotencyKey}</span>
+                                          </div>
+                                        </div>
+
+                                        <div className="bg-[#05080e] p-2.5 rounded border border-slate-900 font-mono text-[10px] text-slate-500 space-y-1">
+                                          <div>Card: 4242 •••• •••• 4242</div>
+                                          <div>Cardholder: AQUILINO FRANCISCO</div>
+                                        </div>
+
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            // Directly transition from step 6 (pending checkout) to step 7 (paid webhook)
+                                            setDemoStep(7);
+                                          }}
+                                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] py-2 rounded transition-all cursor-pointer shadow-md shadow-emerald-950/20 uppercase tracking-wider font-mono flex items-center justify-center gap-1.5"
+                                        >
+                                          <ShieldCheck size={12} />
+                                          Simulate External Secure Pay
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* META INJECTED DETAILS UNDER AGENT BUBBLES */}
+                                  {isAgent && (msg.ragDoc || msg.mcpTool) && (
+                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                      {msg.ragDoc && (
+                                        <span className="text-[9px] font-mono bg-purple-950/40 text-purple-400 border border-purple-900/40 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                          <Database size={9} /> RAG Grounded: {msg.ragDoc}
+                                        </span>
+                                      )}
+                                      {msg.mcpTool && (
+                                        <span className="text-[9px] font-mono bg-amber-950/40 text-amber-300 border border-amber-900/40 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                          <Terminal size={9} /> MCP Tool: {msg.mcpTool}
+                                        </span>
+                                      )}
+                                      {msg.llm && (
+                                        <span className="text-[9px] font-mono bg-blue-950/30 text-blue-400 border border-blue-900/30 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                          <Cpu size={9} /> LLM: {msg.llm} ({llmModel})
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  <div className="text-[9px] text-slate-500 font-mono text-right">{msg.timestamp}</div>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </AnimatePresence>
+                    <div ref={chatEndRef} />
+                  </div>
+                </div>
+
+              </div>
+
+              {/* RIGHT TERMINAL CONTEXT COLUMN */}
+              <div className="w-full xl:w-96 flex flex-col gap-6">
+                
+                {/* INTERACTIVE WORKFLOW STATE CHART */}
+                <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-md flex flex-col justify-between min-h-[220px]">
+                  <div>
+                    <div className="flex items-center justify-between mb-3.5">
+                      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Layers size={14} className="text-sky-400" />
+                        Active State Engine context
+                      </h3>
+                      <span className="text-[10px] bg-sky-950/40 text-sky-400 border border-sky-900/40 px-1.5 py-0.5 rounded font-mono">
+                        Memory Context
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 font-mono text-xs">
+                      <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                        <span className="text-slate-500">Guest Profile Email:</span>
+                        <span className="text-slate-300">aquilino.francisco@gmail.com</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                        <span className="text-slate-500">Reserved Room ID:</span>
+                        <span className="text-slate-300">deluxe-suite</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                        <span className="text-slate-500">Active Currency Ingress:</span>
+                        <span className="text-emerald-400 font-bold">{currency}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                        <span className="text-slate-500">Gateway Provider Router:</span>
+                        <span className="text-indigo-400 font-bold">{currentData.provider.name}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                        <span className="text-slate-500">Amount Parameter:</span>
+                        <span className="text-slate-300 font-bold">{currentData.totalFormatted}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-900 text-[10px] text-slate-500 mt-4 leading-normal flex items-start gap-1.5">
+                    <ShieldCheck size={14} className="text-sky-400 mt-0.5 flex-shrink-0" />
+                    <span>Double spending and parallel draft collision is blocked using unique idempotency checks bound to each payment gateway transaction session.</span>
+                  </div>
+                </div>
+
+                {/* ORCHESTRATION EVENT TERMINAL */}
+                <div className="bg-[#05080e] border border-slate-800/85 rounded-xl flex-1 min-h-[300px] flex flex-col overflow-hidden shadow-lg">
+                  <div className="bg-[#080d16] border-b border-slate-900/80 px-4 py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs text-slate-300 font-bold">
+                      <Terminal size={13} className="text-emerald-400" />
+                      <span>Agent Event Logger Terminal</span>
+                    </div>
+                    <span className="text-[9px] font-mono text-slate-500">stdout</span>
+                  </div>
+
+                  {/* LOGGER WINDOW */}
+                  <div className="flex-1 p-4 font-mono text-[10.5px] leading-relaxed text-slate-400 overflow-y-auto space-y-2">
+                    {demoStep === 0 ? (
+                      <div className="text-slate-600 italic">No events logged. Start the MVP demo to observe node transition telemetry.</div>
+                    ) : (
+                      getLogsUpToStep(demoStep, guestCountry, currency).map((logLine, index) => (
+                        <div key={index} className="border-l-2 border-emerald-950 pl-2 text-slate-300">
+                          <span className="text-slate-500 text-[9px] select-none">[{new Date().toLocaleDateString()} 12:{index*2 < 10 ? '0'+index*2 : index*2}:00]</span> {logLine}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          );
+        })()}
+
+        {/* VIEW 2.5: AI PROVIDERS CONFIGURATION PANEL */}
+        {activeTab === 'providers' && (
+          <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            {/* PROVIDERS HEADER */}
+            <div className="mb-6">
+              <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Sliders size={16} className="text-emerald-400" />
+                AI Providers & Infrastructure Engine
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Configure models, vector stores, and gateway endpoints. Changes immediately update the orchestration context of the live booking workflow.
+              </p>
+            </div>
+
+            {/* BENTO GRID OF CONFIGURATION PANELS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* LLM PROVIDER */}
+              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-md flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Cpu size={14} className="text-purple-400" />
+                      LLM Provider Routing
+                    </h3>
+                    <span className="text-[10px] bg-purple-950/40 text-purple-400 border border-purple-900/40 px-2 py-0.5 rounded font-mono font-semibold">
+                      Agent Orchestrator
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-4 font-sans leading-normal">
+                    Manages the main LLM behind CrewAI and LangGraph workflows. Controls natural language parsing and task decomposition.
+                  </p>
+
+                  <div className="space-y-3.5 mb-4">
+                    <div>
+                      <label className="text-[10px] text-slate-500 font-mono uppercase block mb-1">Select Provider</label>
+                      <select 
+                        value={llmProvider}
+                        onChange={(e) => handleLlmProviderChange(e.target.value)}
+                        className="w-full bg-[#05080e] border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 outline-none cursor-pointer font-sans"
+                      >
+                        <option value="Gemini">Gemini (Google DeepMind)</option>
+                        <option value="OpenAI">OpenAI</option>
+                        <option value="Claude">Claude (Anthropic)</option>
+                        <option value="Llama">Llama 3 (Meta)</option>
+                        <option value="Ollama">Ollama (Local Deployment)</option>
+                        <option value="HuggingFace">HuggingFace Serverless</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 bg-slate-950/50 p-3 rounded-lg border border-slate-900">
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Active Model</span>
+                        <span className="text-xs text-slate-200 font-bold font-mono mt-0.5 block truncate">{llmModel}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">API Connection</span>
+                        <span className="text-xs text-emerald-400 font-bold mt-0.5 block flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          Mocked OK
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-500 border-t border-slate-900 pt-3 flex justify-between items-center">
+                  <span>Routing latency: <span className="text-slate-300 font-mono">140ms</span></span>
+                  <span className="font-mono text-purple-400">api.routing.enterprise</span>
+                </div>
+              </div>
+
+              {/* EMBEDDING PROVIDER */}
+              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-md flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Fingerprint size={14} className="text-blue-400" />
+                      Embedding Provider
+                    </h3>
+                    <span className="text-[10px] bg-blue-950/40 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded font-mono font-semibold">
+                      Vector Indexer
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-4 font-sans leading-normal">
+                    Generates numerical vectors for semantic search in RAG files. Governs RAG indexing accuracy.
+                  </p>
+
+                  <div className="space-y-3.5 mb-4">
+                    <div>
+                      <label className="text-[10px] text-slate-500 font-mono uppercase block mb-1">Select Embedding Provider</label>
+                      <select 
+                        value={embeddingProvider}
+                        onChange={(e) => setEmbeddingProvider(e.target.value)}
+                        className="w-full bg-[#05080e] border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 outline-none cursor-pointer font-sans"
+                      >
+                        <option value="Gemini">Gemini embeddings (text-embedding-004)</option>
+                        <option value="OpenAI">OpenAI embeddings (text-embedding-3-small)</option>
+                        <option value="HuggingFace">HuggingFace (bge-large-en-v1.5)</option>
+                        <option value="Voyage AI">Voyage AI (voyage-3)</option>
+                        <option value="Ollama">Ollama local embeddings</option>
+                        <option value="Mock">Mock Deterministic Embedder</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 bg-slate-950/50 p-3 rounded-lg border border-slate-900">
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Dimensionality</span>
+                        <span className="text-xs text-slate-200 font-bold font-mono mt-0.5 block">
+                          {embeddingProvider === 'OpenAI' ? '1536 dimensions' : embeddingProvider === 'Voyage AI' ? '1024 dimensions' : '768 dimensions'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Index Status</span>
+                        <span className="text-xs text-emerald-400 font-bold mt-0.5 block flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          SYNCHRONIZED
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-500 border-t border-slate-900 pt-3 flex justify-between items-center">
+                  <span>Batch size capability: <span className="text-slate-300 font-mono">2048</span></span>
+                  <span className="font-mono text-blue-400">embeddings.engine</span>
+                </div>
+              </div>
+
+              {/* VECTOR STORE */}
+              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-md flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Database size={14} className="text-pink-400" />
+                      Vector Store Database
+                    </h3>
+                    <span className="text-[10px] bg-pink-950/40 text-pink-400 border border-pink-900/40 px-2 py-0.5 rounded font-mono font-semibold">
+                      Semantic Memory
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-4 font-sans leading-normal">
+                    Stores vector chunks of policy files. Resolves matching scores dynamically during user query lookup.
+                  </p>
+
+                  <div className="space-y-3.5 mb-4">
+                    <div>
+                      <label className="text-[10px] text-slate-500 font-mono uppercase block mb-1">Select Vector Store</label>
+                      <select 
+                        value={vectorStore}
+                        onChange={(e) => setVectorStore(e.target.value)}
+                        className="w-full bg-[#05080e] border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 outline-none cursor-pointer font-sans"
+                      >
+                        <option value="Memory">Local Memory Array (No External Server)</option>
+                        <option value="FAISS">FAISS (Facebook AI Similarity Search)</option>
+                        <option value="PGVector">PGVector (PostgreSQL relational Vector Extension)</option>
+                        <option value="OpenSearch">OpenSearch Service Instance</option>
+                        <option value="Pinecone">Pinecone Cloud Vector Database</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 bg-slate-950/50 p-3 rounded-lg border border-slate-900">
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Connection Status</span>
+                        <span className="text-xs text-slate-200 font-bold font-mono mt-0.5 block truncate">
+                          {vectorStore === 'Pinecone' ? 'pinecone://us-east1' : vectorStore === 'PGVector' ? 'postgresql://localhost' : 'localhost:in_memory'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Metrics Index</span>
+                        <span className="text-xs text-pink-400 font-bold mt-0.5 block">
+                          Cosine Similarity
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-500 border-t border-slate-900 pt-3 flex justify-between items-center">
+                  <span>Document chunk size: <span className="text-slate-300 font-mono">512 tokens</span></span>
+                  <span className="font-mono text-pink-400">vector.db.connection</span>
+                </div>
+              </div>
+
+              {/* PAYMENT GATEWAY ROUTER */}
+              <div className="bg-[#080d16] border border-slate-800/80 rounded-xl p-5 shadow-md flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <CreditCard size={14} className="text-emerald-400" />
+                      Payment Provider Gateway
+                    </h3>
+                    <span className="text-[10px] bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded font-mono font-semibold">
+                      Enterprise Router
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-4 font-sans leading-normal">
+                    Provider-agnostic payment gateway router. Chooses Stripe, PayPal, or local processors according to region rules.
+                  </p>
+
+                  <div className="space-y-3.5 mb-4">
+                    <div>
+                      <label className="text-[10px] text-slate-500 font-mono uppercase block mb-1">Select Gateway Provider</label>
+                      <select 
+                        value={paymentProvider}
+                        onChange={(e) => handlePaymentProviderChange(e.target.value)}
+                        className="w-full bg-[#05080e] border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 outline-none cursor-pointer font-sans"
+                      >
+                        <option value="Stripe">Stripe (Global Default - US Ingress)</option>
+                        <option value="PayPal">PayPal Commerce (US Ingress)</option>
+                        <option value="Adyen">Adyen Unified Commerce (US Ingress)</option>
+                        <option value="Checkout.com">Checkout.com Gateway (US Ingress)</option>
+                        <option value="Klarna">Klarna Pay Later (US Ingress)</option>
+                        <option value="Conekta">Conekta (Mexico Regional Ingress)</option>
+                        <option value="Mercado Pago">Mercado Pago (Brazil Regional Ingress)</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 bg-slate-950/50 p-3 rounded-lg border border-slate-900">
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Country Ingress / Currency</span>
+                        <span className="text-xs text-slate-200 font-bold font-mono mt-0.5 block truncate">
+                          {guestCountry} / {currency}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-mono uppercase block">Router Rules Status</span>
+                        <span className="text-xs text-emerald-400 font-bold mt-0.5 block truncate">
+                          {paymentProvider === 'Conekta' ? 'Mexico Order Ingress' : paymentProvider === 'Mercado Pago' ? 'Brazil Order Ingress' : 'US Order Ingress'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-500 border-t border-slate-900 pt-3 flex justify-between items-center">
+                  <span>Routing webhook latency: <span className="text-slate-300 font-mono">18ms</span></span>
+                  <span className="font-mono text-emerald-400">payments.gateway.router</span>
                 </div>
               </div>
 
             </div>
-
           </div>
         )}
 
