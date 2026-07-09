@@ -1,7 +1,6 @@
 
-# Hospitality Reservation Payment Agent
 
-## A Provider-Agnostic Agentic AI Platform Reference Architecture
+# A Provider-Agnostic Agentic AI Platform Reference Architecture
 
 ## Overview
 
@@ -288,50 +287,162 @@ Current implementation includes:
 
 ---
 
-# Future Roadmap
+# MVP Roadmap
 
-## AI Platform Evolution
+The project is intentionally being developed incrementally.
 
-- AI Provider Selection Engine
-- Embedding Provider Factory
-- Vector Store Factory
+Each sprint delivers a fully functional architectural capability before introducing additional complexity.
 
-## Intelligent Orchestration
+## Sprint 1 — Foundation ✅
 
-- Dynamic LangGraph Routing
-- Multi-Agent Collaboration
-- Event-Driven Workflows
-- Human-in-the-Loop Approval
-
-## Business Automation
-
-- Notification Agent
-- Email Integration
-- WhatsApp Integration
-- SMS Integration
-- CRM Integration
-- Housekeeping Integration
-- Invoice Generation
-
-## Enterprise Capabilities
-
-- Multi-Tenant Architecture
-- Observability Dashboard
-- Analytics & Reporting
-- Kubernetes Deployment
-- CI/CD Pipeline
+- FastAPI
+- Layered Architecture
+- Repository Pattern
+- Service Layer
+- JSON Mock Repositories
+- Structured Logging
 
 ---
 
-# Design Principles
+## Sprint 2 — Provider Agnostic Platform ✅
 
-- Separation of Concerns
-- Provider Agnostic Architecture
-- Event-Driven Design
-- Repository Pattern
-- Service Layer
-- Dependency Inversion
-- Human-in-the-Loop
-- Webhooks as Source of Truth
-- Full Auditability
-- Extensibility First
+- Payment Router
+- Payment Provider Factory
+- LLM Router
+- LLM Provider Factory
+- Embedding Router
+- Embedding Provider Factory
+- Vector Store Router
+- Vector Store Factory
+
+---
+
+## Sprint 3 — Agentic AI Core ✅
+
+- LangGraph Workflow
+- CrewAI Agents
+- MCP Tool Server
+- Local RAG
+
+---
+
+## Sprint 4 — Reservation Workflow (Current)
+
+- Reservation lifecycle
+- Payment lifecycle
+- Human-in-the-loop
+- RAG integration
+- Business policies
+- End-to-end workflow
+
+---
+
+## Sprint 5
+
+- Prompt Versioning
+- Context Management
+- Prompt Caching
+- Semantic Cache
+- Audit Trail
+
+---
+
+## Sprint 6
+
+- Production Hardening
+- Metrics
+- Monitoring
+- Tracing
+- Documentation
+___
+
+# Production Readiness
+
+Capability
+Status
+Layered Architecture
+✅
+Provider Agnostic
+✅
+Repository Pattern
+✅
+Service Layer
+✅
+LangGraph
+✅
+CrewAI
+✅
+MCP
+✅
+Local RAG
+✅
+Human Approval
+🚧
+Prompt Versioning
+🚧
+Prompt Caching
+🚧
+Semantic Cache
+🚧
+Observability
+🚧
+Metrics
+🚧
+Distributed Tracing
+🚧
+Kubernetes
+📅
+Multi-Tenant
+📅
+
+___
+
+# Security Roadmap
+
+Current
+
+- Provider isolation
+- Layered architecture
+- Business services
+- MCP controlled execution
+- Structured logging
+
+Next
+
+- Prompt Injection Detection
+- Tool Permissioning
+- Human Approval
+- RBAC
+- Audit Trail
+- Policy Engine
+- Context Isolation
+- Tenant Isolation
+- Secrets Management
+
+___
+
+# Architecture Decisions
+
+ADR-001
+Provider-Agnostic Architecture
+
+ADR-002
+LangGraph as Workflow Engine
+
+ADR-003
+CrewAI for Specialist Agents
+
+ADR-004
+MCP as Tool Layer
+
+ADR-005
+Repository Pattern
+
+ADR-006
+Business Services as Source of Truth
+
+ADR-007
+Local RAG
+
+ADR-008
+Human-in-the-Loop
