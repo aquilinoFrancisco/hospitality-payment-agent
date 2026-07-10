@@ -81,23 +81,44 @@ External providers never contain business logic.
 
 # Business Goal
 
-Build an AI Agent platform capable of:
+Build a reusable Provider-Agnostic, Layered Agentic AI Platform capable of solving enterprise business workflows without coupling orchestration, agents, tools, services, or domain logic to a specific vendor.
 
-- Validating reservation requests
-- Checking room availability
-- Calculating reservation pricing
-- Consulting hotel policies using Local RAG
-- Generating secure payment links
-- Supporting multiple payment providers
-- Supporting multiple LLM providers
-- Supporting multiple embedding providers
-- Supporting multiple vector stores
-- Receiving webhook confirmations
-- Maintaining a fully auditable workflow
+The architecture is designed to separate business decisions from external providers, allowing each domain capability to evolve independently while preserving a stable workflow.
 
-The AI agent never charges customers directly.
+The platform demonstrates how Agentic AI can coordinate multiple business domains such as:
 
-It only orchestrates business capabilities through controlled MCP Tools.
+* Reservations
+* Payments
+* Customer support
+* Policy consultation
+* Pricing
+* Notifications
+* Maintenance
+* Upselling and cross-selling
+
+Core platform capabilities include:
+
+Provider-agnostic LLM, embedding, vector store, and payment integrations
+Layered separation between orchestration, agents, tools, services, repositories, and providers
+LangGraph-based stateful workflow orchestration
+Specialized CrewAI agents by business domain
+Controlled business execution through MCP Tools
+Retrieval-Augmented Generation for enterprise knowledge
+Deterministic business rules for pricing, availability, payments, and eligibility
+
+Configurable providers through environment settings
+Mock implementations for local development and deterministic testing
+
+Idempotent payment operations
+Webhook-driven state transitions
+Human-in-the-Loop support for sensitive or irreversible actions
+Structured logging and auditable execution trace.
+
+Extensible architecture for additional domains and integrations
+
+The objective is to provide a reference architecture where new business domains, agents, tools, models, databases, and external providers can be added without rewriting the core workflow.
+
+The AI layer reasons and coordinates tasks, while Business Services remain the source of truth and MCP Tools provide the controlled boundary for executing real-world actions.
 
 ---
 
