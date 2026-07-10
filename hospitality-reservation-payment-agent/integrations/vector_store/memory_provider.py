@@ -51,8 +51,7 @@ class MemoryVectorStoreProvider(VectorStoreProvider):
             self._documents[document_id] = {
                 **document,
                 "metadata": {
-                    **document.get("metadata", {}),
-                    **metadata,
+                    **metadata, **document.get("metadata", {}),
                 },
             }
 
