@@ -1,6 +1,6 @@
 
 
-# A Provider-Agnostic Agentic AI Platform Reference Architecture
+# Capability-Driven Agentic AI Platform
 
 ## Overview
 
