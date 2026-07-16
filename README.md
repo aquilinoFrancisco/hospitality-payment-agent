@@ -4,7 +4,7 @@
 
 ## Overview
 
-Hospitality Reservation Payment Agent is a reference implementation of a modern **Provider-Agnostic Agentic AI Platform**.
+Hospitality Reservation Payment Agent is a reference implementation of a modern **Capability-Driven Agentic AI Platform**.
 
 Although the current business domain focuses on hotel reservations and payments, the architectural patterns are intentionally designed to be reusable across different enterprise AI solutions.
 
